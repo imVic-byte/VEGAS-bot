@@ -2,8 +2,14 @@ const {
     SlashCommandBuilder,
     ActionRowBuilder,
     ButtonBuilder,
-    ButtonStyle
+    ButtonStyle,
+    ComponentType,
+    EmbedBuilder
 } = require('discord.js');
+const supabase = require('../supabase');
+const { noMoney, yourself, together } = require('../utils/responses');
+
+const cooldowns = new Map();
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -18,6 +24,21 @@ module.exports = {
         ),
 
     async execute(interaction) {
+        const tiempoCooldown = 120000;
+
+        if (cooldowns.has(interaction.user.id)) {
+            const tiempoExpiracion = cooldowns.get(interaction.user.id) + tiempoCooldown;
+
+            if (Date.now() < tiempoExpiracion) {
+                const tiempoRestante = (tiempoExpiracion - Date.now()) / 1000;
+                return interaction.reply({
+                    content: `Debes esperar ${tiempoRestante.toFixed(1)} segundos antes de volver a pedir monedas.`,
+                    ephemeral: true
+                });
+            }
+        }
+
+        cooldowns.set(interaction.user.id, Date.now());
 
         const cantidad = interaction.options.getInteger('cantidad');
 
@@ -36,6 +57,11 @@ module.exports = {
 
         const mensaje = frases[Math.floor(Math.random() * frases.length)];
 
+        const embedPeticion = new EmbedBuilder()
+            .setColor(0xFEE75C)
+            .setDescription(`${mensaje}\n\n⏰ Expira en 60 segundos.`)
+            .setImage('https://rnhdmonauucuxpovqxun.supabase.co/storage/v1/object/public/vegas-media/beg.jpg');
+
         const boton = new ButtonBuilder()
             .setCustomId(`beg_${interaction.user.id}_${cantidad}`)
             .setLabel(`💸 Donar ${cantidad}`)
@@ -45,17 +71,72 @@ module.exports = {
             .addComponents(boton);
 
         const respuesta = await interaction.reply({
-            content: `${mensaje}\n\n⏰ Expira en 60 segundos.`,
+            embeds: [embedPeticion],
             components: [fila],
             fetchReply: true
         });
 
-        setTimeout(async () => {
+        const collector = respuesta.createMessageComponentCollector({
+            componentType: ComponentType.Button,
+            time: 60000
+        });
 
-            try {
+        collector.on('collect', async i => {
+            if (i.customId === `beg_${interaction.user.id}_${cantidad}`) {
+                if (i.user.id === interaction.user.id) {
+                    await i.reply(yourself());
+                    return;
+                }
+                
+                const { data: donor, error: donorError } = await supabase
+                    .from('perfiles_economia')
+                    .select('balance')
+                    .eq('discord_id', i.user.id)
+                    .single();
 
-                // Si el botón sigue existiendo, nadie donó
-                if (respuesta.components.length > 0) {
+                if (donorError || !donor) {
+                    return i.reply({ content: 'No tienes una cuenta registrada o ha ocurrido un error.', ephemeral: true });
+                }
+
+                if (Number(donor.balance) < cantidad) {
+                    return i.reply(noMoney(donor.balance));
+                }
+
+                const { data: beggar, error: beggarError } = await supabase
+                    .from('perfiles_economia')
+                    .select('balance')
+                    .eq('discord_id', interaction.user.id)
+                    .single();
+
+                if (beggarError || !beggar) {
+                    return i.reply({ content: 'El usuario que pide monedas no tiene una cuenta válida.', ephemeral: true });
+                }
+
+                const { error: deductError } = await supabase
+                    .from('perfiles_economia')
+                    .update({ balance: Number(donor.balance) - cantidad })
+                    .eq('discord_id', i.user.id);
+
+                if (deductError) {
+                    return i.reply({ content: 'Hubo un error al procesar la donación.', ephemeral: true });
+                }
+
+                const { error: addError } = await supabase
+                    .from('perfiles_economia')
+                    .update({ balance: Number(beggar.balance) + cantidad })
+                    .eq('discord_id', interaction.user.id);
+
+                if (addError) {
+                    console.error('Error adding balance to beggar:', addError);
+                }
+
+                await i.update(together(i.user.id, interaction.user.id, cantidad));
+                
+                collector.stop('donado');
+            }
+        });
+        collector.on('end', async (collected, reason) => {
+            if (reason !== 'donado') {
 
                     const rechazos = [
                         `💀 Nadie quiso ayudar a este ludópata.\n\n<@${interaction.user.id}> tendrá que esperar otra oportunidad.`,
@@ -112,17 +193,21 @@ module.exports = {
                     const frase =
                         rechazos[Math.floor(Math.random() * rechazos.length)];
 
-                    await respuesta.edit({
-                        content: frase,
-                        components: []
-                    });
+                    const embedRechazo = new EmbedBuilder()
+                        .setColor(0xED4245)
+                        .setDescription(frase)
+                        .setImage('https://rnhdmonauucuxpovqxun.supabase.co/storage/v1/object/public/vegas-media/nohelp.jpg');
 
-                }
-
-            } catch (error) {
-                console.error(error);
+                    try {
+                        await respuesta.edit({
+                            content: '',
+                            embeds: [embedRechazo],
+                            components: []
+                        });
+                    } catch (error) {
+                        console.error(error);
+                    }
             }
-
-        }, 60000);
+        });
     }
 };

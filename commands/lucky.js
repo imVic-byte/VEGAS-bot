@@ -1,5 +1,7 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const wait = require('node:timers/promises').setTimeout;
 const supabase = require('../supabase');
+const { noMoney } = require('../utils/responses');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -12,12 +14,15 @@ module.exports = {
                 .addChoices(
                     { name: 'Cara', value: 'cara' },
                     { name: 'Sello', value: 'sello' }
-                ))
+                )
+        )
         .addIntegerOption(option =>
             option.setName('apuesta')
                 .setDescription('Cantidad de monedas a apostar')
                 .setRequired(true)
-                .setMinValue(1)),
+                .setMinValue(1)
+        ),
+        
     async execute(interaction) {
         await interaction.deferReply();
 
@@ -31,18 +36,58 @@ module.exports = {
             .eq('discord_id', discordId)
             .single();
 
-        if (selectError || !user) {
+        if (selectError && selectError.code !== 'PGRST116') {
+            return interaction.editReply('Error de conexion con la base de datos.');
+        }
+
+        if (!user) {
             return interaction.editReply('No tienes una cuenta registrada. Usa /daily primero.');
         }
 
-        if (user.balance < apuesta) {
-            return interaction.editReply(`Saldo insuficiente. Actualmente tienes ${user.balance} monedas.`);
+        if (Number(user.balance) < apuesta) {
+            return interaction.editReply(noMoney(user.balance));
         }
 
-        const resultado = Math.random() < 0.5 ? 'cara' : 'sello';
-        const gano = eleccion === resultado;
+        const embedGiro = new EmbedBuilder()
+            .setColor(0xFEE75C)
+            .setTitle('Lanzando la moneda al aire...')
+            .setImage('https://rnhdmonauucuxpovqxun.supabase.co/storage/v1/object/public/vegas-media/coin-flip.gif');
 
-        const nuevoBalance = gano ? Number(user.balance) + apuesta : Number(user.balance) - apuesta;
+        await interaction.editReply({ embeds: [embedGiro] });
+
+        await wait(2500);
+
+        const rngEspecial = Math.random();
+        let resultado;
+        let multiplicador = 1;
+        let cayoDeCanto = false;
+
+        if (rngEspecial < 0.03) {
+            resultado = 'canto';
+            multiplicador = 3;
+            cayoDeCanto = true;
+        } else {
+            resultado = Math.random() < 0.5 ? 'cara' : 'sello';
+        }
+
+        const ganoNormal = eleccion === resultado;
+        let nuevoBalance;
+        let tituloResultado;
+        let colorEmbed;
+
+        if (cayoDeCanto) {
+            nuevoBalance = Number(user.balance) + (apuesta * multiplicador);
+            tituloResultado = 'LA MONEDA CAYO DE CANTO';
+            colorEmbed = 0xFFD700;
+        } else if (ganoNormal) {
+            nuevoBalance = Number(user.balance) + apuesta;
+            tituloResultado = `Salio ${resultado.toUpperCase()}`;
+            colorEmbed = 0x57F287;
+        } else {
+            nuevoBalance = Number(user.balance) - apuesta;
+            tituloResultado = `Salio ${resultado.toUpperCase()}`;
+            colorEmbed = 0xED4245;
+        }
 
         const { error: updateError } = await supabase
             .from('perfiles_economia')
@@ -50,14 +95,32 @@ module.exports = {
             .eq('discord_id', discordId);
 
         if (updateError) {
-            console.error(updateError);
-            return interaction.editReply('Error al contactar con la base de datos para actualizar tu saldo.');
+            return interaction.editReply({ 
+                content: 'Error al actualizar tu saldo.', 
+                embeds: [] 
+            });
         }
 
-        if (gano) {
-            return interaction.editReply(`¡Salió **${resultado}**! Ganaste **${apuesta}** monedas. Saldo actual: $**${nuevoBalance}**.`);
-        } else {
-            return interaction.editReply(`¡Salió **${resultado}**! Perdiste **${apuesta}** monedas. Saldo actual: $**${nuevoBalance}**.`);
+        const embedFinal = new EmbedBuilder()
+            .setColor(colorEmbed)
+            .setTitle(tituloResultado);
+
+        if (resultado === 'cara') {
+            embedFinal.setImage('https://rnhdmonauucuxpovqxun.supabase.co/storage/v1/object/public/vegas-media/Cara.png');
+        } else if (resultado === 'sello') {
+            embedFinal.setImage('https://rnhdmonauucuxpovqxun.supabase.co/storage/v1/object/public/vegas-media/Sello.png');
+        } else if (resultado === 'canto') {
+            embedFinal.setImage('https://rnhdmonauucuxpovqxun.supabase.co/storage/v1/object/public/vegas-media/Canto.png');
         }
+
+        if (cayoDeCanto) {
+            embedFinal.setDescription(`Un evento rarisimo acaba de ocurrir.\nMultiplicas tu apuesta x${multiplicador}.\n\nGanaste ${apuesta * multiplicador} monedas.\nSaldo actual: ${nuevoBalance}`);
+        } else if (ganoNormal) {
+            embedFinal.setDescription(`Ganaste ${apuesta} monedas.\nSaldo actual: ${nuevoBalance}`);
+        } else {
+            embedFinal.setDescription(`Perdiste ${apuesta} monedas.\nSaldo actual: ${nuevoBalance}`);
+        }
+
+        return interaction.editReply({ embeds: [embedFinal] });
     }
 };
