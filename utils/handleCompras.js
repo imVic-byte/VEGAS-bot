@@ -102,6 +102,19 @@ async function procesarCompra(interaction, itemType, itemId) {
             if (item) itemName = item.name;
             inventoryTableName = 'inventario_titulos';
             inventoryColumnName = 'titulo_id';
+        } else if (itemType === 'item') {
+            const { data } = await supabase.from('tienda_items').select('*').eq('id', itemId).single();
+            if (data) {
+                item = {
+                    id: data.id,
+                    price: data.precio_base,
+                    usos_iniciales: data.usos_iniciales,
+                    duracion_minutos: data.duracion_minutos
+                };
+                itemName = data.nombre;
+                inventoryTableName = 'inventario_items';
+                inventoryColumnName = 'item_id';
+            }
         }
 
         if (!item) {
@@ -152,6 +165,14 @@ async function procesarCompra(interaction, itemType, itemId) {
         // Agregar al inventario correspondiente
         let inventoryData = { discord_id: discordId };
         inventoryData[inventoryColumnName] = item.id;
+
+        if (itemType === 'item') {
+            inventoryData.usos_restantes = item.usos_iniciales;
+            if (item.duracion_minutos && item.duracion_minutos > 0) {
+                const milisegundos = item.duracion_minutos * 60000;
+                inventoryData.expira_el = new Date(Date.now() + milisegundos).toISOString();
+            }
+        }
 
         const { error: inventoryError } = await supabase
             .from(inventoryTableName)
