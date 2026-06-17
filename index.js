@@ -1,6 +1,17 @@
 require('dotenv').config();
 const fs = require('node:fs');
 const path = require('node:path');
+
+const http = require('http');
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot online');
+});
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log('Servidor de enlace listo');
+});
+
 const { Client, Collection, GatewayIntentBits } = require('discord.js');
 
 const client = new Client({
