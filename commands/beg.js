@@ -112,6 +112,9 @@ module.exports = {
                     return i.reply({ content: 'El usuario que pide monedas no tiene una cuenta válida.', ephemeral: true });
                 }
 
+                const impuesto = Math.floor(cantidad * 0.12);
+                const neto = cantidad - impuesto;
+
                 const { error: deductError } = await supabase
                     .from('perfiles_economia')
                     .update({ balance: Number(donor.balance) - cantidad })
@@ -123,14 +126,24 @@ module.exports = {
 
                 const { error: addError } = await supabase
                     .from('perfiles_economia')
-                    .update({ balance: Number(beggar.balance) + cantidad })
+                    .update({ balance: Number(beggar.balance) + neto })
                     .eq('discord_id', interaction.user.id);
 
                 if (addError) {
                     console.error('Error adding balance to beggar:', addError);
                 }
 
-                await i.update(together(i.user.id, interaction.user.id, cantidad));
+                const embedDonacion = new EmbedBuilder()
+                    .setColor(0x57F287)
+                    .setDescription(`💖 <@${i.user.id}> se compadeció y donó **${cantidad}** monedas a <@${interaction.user.id}>.\n\n` + 
+                    `🏛️ El Fisco retuvo **${impuesto}** monedas (12% IVA).\n` +
+                    `📦 <@${interaction.user.id}> recibió un neto de **${neto}** monedas.`);
+
+                await i.update({
+                    content: '',
+                    embeds: [embedDonacion],
+                    components: []
+                });
                 
                 collector.stop('donado');
             }

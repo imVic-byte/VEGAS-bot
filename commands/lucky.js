@@ -1,7 +1,9 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { verificarEstadoMorosidad } = require('../utils/handleMorosidad');
 const wait = require('node:timers/promises').setTimeout;
 const supabase = require('../supabase');
 const { noMoney } = require('../utils/responses');
+const { getUserWithBuffs, applyBuffs, getTotalBuffValue } = require('../utils/handleUser');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -26,23 +28,22 @@ module.exports = {
     async execute(interaction) {
         await interaction.deferReply();
 
+        const estadoMora = await verificarEstadoMorosidad(interaction.user.id);
+        if (estadoMora.bloqueado) {
+            return interaction.editReply(`🚫 **Acceso Denegado**\nNo puedes apostar en el casino porque el banco te ha embargado por morosidad.\nTienes una deuda vencida de **${estadoMora.deuda}** monedas. Usa \`/prestamo pagar\` para regularizar tu situación.`);
+        }
+
         const eleccion = interaction.options.getString('cara_o_sello');
         const apuesta = interaction.options.getInteger('apuesta');
         const discordId = interaction.user.id;
 
-        const { data: user, error: selectError } = await supabase
-            .from('perfiles_economia')
-            .select('balance')
-            .eq('discord_id', discordId)
-            .single();
+        const userData = await getUserWithBuffs(discordId);
 
-        if (selectError && selectError.code !== 'PGRST116') {
-            return interaction.editReply('Error de conexion con la base de datos.');
-        }
-
-        if (!user) {
+        if (!userData || !userData.profile) {
             return interaction.editReply('No tienes una cuenta registrada. Usa /daily primero.');
         }
+
+        const user = userData.profile;
 
         if (Number(user.balance) < apuesta) {
             return interaction.editReply(noMoney(user.balance));
@@ -57,36 +58,61 @@ module.exports = {
 
         await wait(2500);
 
-        const rngEspecial = Math.random();
+        const suerteBuff = getTotalBuffValue(userData.buffs, 'suerte');
+        const coinsBuffPercentage = getTotalBuffValue(userData.buffs, 'coins');
+
+        const rngCanto = Math.random() * 100;
         let resultado;
         let multiplicador = 1;
         let cayoDeCanto = false;
 
-        if (rngEspecial < 0.03) {
+        if (rngCanto < 3) {
             resultado = 'canto';
             multiplicador = 3;
             cayoDeCanto = true;
         } else {
-            resultado = Math.random() < 0.5 ? 'cara' : 'sello';
+            const winChance = 50 + suerteBuff;
+            const rngWin = Math.random() * 100;
+            if (rngWin < winChance) {
+                resultado = eleccion;
+            } else {
+                resultado = eleccion === 'cara' ? 'sello' : 'cara';
+            }
         }
 
         const ganoNormal = eleccion === resultado;
         let nuevoBalance;
         let tituloResultado;
         let colorEmbed;
+        let gananciaTexto = '';
 
         if (cayoDeCanto) {
-            nuevoBalance = Number(user.balance) + (apuesta * multiplicador);
-            tituloResultado = 'LA MONEDA CAYO DE CANTO';
+            let gananciaBase = apuesta * multiplicador;
+            let gananciaReal = applyBuffs(gananciaBase, userData.buffs, 'coins');
+            nuevoBalance = Number(user.balance) + gananciaReal;
+            tituloResultado = 'LA MONEDA CAYÓ DE CANTO';
             colorEmbed = 0xFFD700;
+            gananciaTexto = `Un evento rarísimo acaba de ocurrir.\nMultiplicas tu apuesta x${multiplicador}.\n\nGanaste ${gananciaReal} monedas${coinsBuffPercentage > 0 ? ' (buffos aplicados)' : ''}.\nSaldo actual: ${nuevoBalance}`;
         } else if (ganoNormal) {
-            nuevoBalance = Number(user.balance) + apuesta;
-            tituloResultado = `Salio ${resultado.toUpperCase()}`;
+            let gananciaReal = applyBuffs(apuesta, userData.buffs, 'coins');
+            nuevoBalance = Number(user.balance) + gananciaReal;
+            tituloResultado = `Salió ${resultado.toUpperCase()}`;
             colorEmbed = 0x57F287;
+            gananciaTexto = `Ganaste ${gananciaReal} monedas${coinsBuffPercentage > 0 ? ' (buffos aplicados)' : ''}.\nSaldo actual: ${nuevoBalance}`;
         } else {
-            nuevoBalance = Number(user.balance) - apuesta;
-            tituloResultado = `Salio ${resultado.toUpperCase()}`;
+            let perdidaReal = apuesta;
+            if (coinsBuffPercentage > 0) {
+                const retencion = Math.min(coinsBuffPercentage, 100);
+                perdidaReal = Math.floor(apuesta * (1 - (retencion / 100)));
+            }
+            nuevoBalance = Number(user.balance) - perdidaReal;
+            tituloResultado = `Salió ${resultado.toUpperCase()}`;
             colorEmbed = 0xED4245;
+            if (perdidaReal < apuesta) {
+                gananciaTexto = `Perdiste ${perdidaReal} monedas (retuviste algunas gracias a tu mascota).\nSaldo actual: ${nuevoBalance}`;
+            } else {
+                gananciaTexto = `Perdiste ${apuesta} monedas.\nSaldo actual: ${nuevoBalance}`;
+            }
         }
 
         const { error: updateError } = await supabase
@@ -101,9 +127,21 @@ module.exports = {
             });
         }
 
+        if (!ganoNormal && !cayoDeCanto) {
+            const { procesarSeguro } = require('../utils/handleSeguro');
+            const resultadoSeguro = await procesarSeguro(discordId, apuesta);
+            
+            if (resultadoSeguro.tituloDerrota === 'Derrota Asegurada') {
+                tituloResultado = resultadoSeguro.tituloDerrota;
+                nuevoBalance += Math.floor(apuesta * 0.25);
+                gananciaTexto = `${resultadoSeguro.descripcionDerrota}\nSaldo actual: ${nuevoBalance}`;
+            }
+        }
+
         const embedFinal = new EmbedBuilder()
             .setColor(colorEmbed)
-            .setTitle(tituloResultado);
+            .setTitle(tituloResultado)
+            .setDescription(gananciaTexto);
 
         if (resultado === 'cara') {
             embedFinal.setImage('https://rnhdmonauucuxpovqxun.supabase.co/storage/v1/object/public/vegas-media/Cara.png');
@@ -113,12 +151,8 @@ module.exports = {
             embedFinal.setImage('https://rnhdmonauucuxpovqxun.supabase.co/storage/v1/object/public/vegas-media/Canto.png');
         }
 
-        if (cayoDeCanto) {
-            embedFinal.setDescription(`Un evento rarisimo acaba de ocurrir.\nMultiplicas tu apuesta x${multiplicador}.\n\nGanaste ${apuesta * multiplicador} monedas.\nSaldo actual: ${nuevoBalance}`);
-        } else if (ganoNormal) {
-            embedFinal.setDescription(`Ganaste ${apuesta} monedas.\nSaldo actual: ${nuevoBalance}`);
-        } else {
-            embedFinal.setDescription(`Perdiste ${apuesta} monedas.\nSaldo actual: ${nuevoBalance}`);
+        if (userData.activePet) {
+            embedFinal.setFooter({ text: `🐾 Acompañado por: ${userData.activePet.title}` });
         }
 
         return interaction.editReply({ embeds: [embedFinal] });

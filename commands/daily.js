@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const supabase = require('../supabase');
 
 module.exports = {
@@ -10,7 +10,7 @@ module.exports = {
         await interaction.deferReply();
 
         const discordId = interaction.user.id;
-        const reward = 500;
+        const reward = 1000;
 
         const { data: user, error: selectError } = await supabase
             .from('perfiles_economia')
@@ -51,20 +51,72 @@ module.exports = {
             return interaction.editReply(`Vuelve en ${hoursLeft} horas y ${minutesLeft} minutos para tu siguiente recompensa.`);
         }
 
-        const newBalance = Number(user.balance) + reward;
+        const deudaTotal = Number(user.deuda_prestamo) || 0;
+        let nuevaDeuda = deudaTotal;
+        let nuevoBalance = Number(user.balance);
+        let montoEmbargo = 0;
+        let recompensaNeta = reward;
+        let fueEmbargado = false;
+        let nuevoVencimiento = user.vencimiento_prestamo;
+
+        const isVencido = user.vencimiento_prestamo ? new Date(user.vencimiento_prestamo) <= now : false;
+
+        if (deudaTotal > 0 && isVencido) {
+            fueEmbargado = true;
+            // Cálculo del embargo del 90%
+            montoEmbargo = Math.floor(reward * 0.90);
+
+            // Ajuste si el embargo supera lo que debe
+            if (montoEmbargo >= deudaTotal) {
+                montoEmbargo = deudaTotal;
+            }
+
+            nuevaDeuda = deudaTotal - montoEmbargo;
+            recompensaNeta = reward - montoEmbargo;
+            
+            if (nuevaDeuda === 0) {
+                nuevoVencimiento = null;
+            }
+        }
+
+        nuevoBalance += recompensaNeta;
 
         const { error: updateError } = await supabase
             .from('perfiles_economia')
             .update({ 
-                balance: newBalance, 
-                ultima_recompensa: new Date().toISOString() 
+                balance: nuevoBalance, 
+                deuda_prestamo: nuevaDeuda,
+                vencimiento_prestamo: nuevoVencimiento,
+                ultima_recompensa: now.toISOString() 
             })
             .eq('discord_id', discordId);
 
         if (updateError) {
-            return interaction.editReply('Error al actualizar tu saldo.');
+            return interaction.editReply('Error al actualizar tu saldo en la base de datos.');
         }
 
-        return interaction.editReply(`Reclamaste tu paga diaria de ${reward} monedas. Saldo actual: ${newBalance}.`);
+        const embed = new EmbedBuilder()
+            .setTitle('🎁 Recompensa Diaria')
+            .setColor(fueEmbargado ? 'Orange' : 'Green')
+            .addFields(
+                { name: 'Recompensa Base', value: `${reward} monedas`, inline: true }
+            );
+
+        if (fueEmbargado) {
+            embed.setDescription(`⚠️ **Aviso de Morosidad Activa**\nDebido a que tienes una deuda vencida en el banco, el sistema ha procedido con un **embargo automático** de tus ingresos para amortizar la deuda.`);
+            embed.addFields(
+                { name: 'Monto Embargado', value: `-${montoEmbargo} monedas`, inline: true },
+                { name: 'Deuda Restante', value: `${nuevaDeuda} monedas`, inline: true }
+            );
+        } else {
+            embed.setDescription(`¡Has reclamado tu recompensa diaria exitosamente!`);
+        }
+
+        embed.addFields(
+            { name: 'Ingreso Neto', value: `+${recompensaNeta} monedas`, inline: false },
+            { name: 'Billetera Actual', value: `${nuevoBalance} monedas`, inline: false }
+        );
+
+        return interaction.editReply({ embeds: [embed] });
     }
 };

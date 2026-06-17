@@ -5,6 +5,7 @@ const {
     ButtonStyle,
     ComponentType
 } = require('discord.js');
+const { verificarEstadoMorosidad } = require('../utils/handleMorosidad');
 
 const blackjackGames = require('../blackjackGames');
 const supabase = require('../supabase');
@@ -62,6 +63,11 @@ module.exports = {
 
     async execute(interaction) {
         await interaction.deferReply();
+
+        const estadoMora = await verificarEstadoMorosidad(interaction.user.id);
+        if (estadoMora.bloqueado) {
+            return interaction.editReply(`🚫 **Acceso Denegado**\nNo puedes apostar en el casino porque el banco te ha embargado por morosidad.\nTienes una deuda vencida de **${estadoMora.deuda}** monedas. Usa \`/prestamo pagar\` para regularizar tu situación.`);
+        }
 
         const apuesta = interaction.options.getInteger('apuesta');
         const userId = interaction.user.id;
@@ -183,6 +189,17 @@ module.exports = {
                         .eq('discord_id', userId);
                 } catch (error) {
                     console.error(error);
+                }
+            }
+
+            if (balanceFinal < Number(user.balance)) {
+                const { procesarSeguro } = require('../utils/handleSeguro');
+                const resultadoSeguro = await procesarSeguro(userId, apuesta);
+                
+                if (resultadoSeguro.tituloDerrota === 'Derrota Asegurada') {
+                    const reembolso = Math.floor(apuesta * 0.25);
+                    balanceFinal += reembolso;
+                    resultadoTexto += `\n\n🛡️ **${resultadoSeguro.tituloDerrota}:** ${resultadoSeguro.descripcionDerrota}`;
                 }
             }
 
