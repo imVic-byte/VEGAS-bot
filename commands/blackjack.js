@@ -2,8 +2,10 @@ const {
     SlashCommandBuilder,
     ActionRowBuilder,
     ButtonBuilder,
-    ButtonStyle
+    ButtonStyle,
+    ComponentType
 } = require('discord.js');
+const { verificarEstadoMorosidad } = require('../utils/handleMorosidad');
 
 const blackjackGames = require('../blackjackGames');
 const supabase = require('../supabase');
@@ -11,7 +13,6 @@ const supabase = require('../supabase');
 function crearMazo() {
     const palos = ['♠️', '♥️', '♦️', '♣️'];
     const valores = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-
     const mazo = [];
 
     for (const palo of palos) {
@@ -61,8 +62,12 @@ module.exports = {
         ),
 
     async execute(interaction) {
-
         await interaction.deferReply();
+
+        const estadoMora = await verificarEstadoMorosidad(interaction.user.id);
+        if (estadoMora.bloqueado) {
+            return interaction.editReply(`🚫 **Acceso Denegado**\nNo puedes apostar en el casino porque el banco te ha embargado por morosidad.\nTienes una deuda vencida de **${estadoMora.deuda}** monedas. Usa \`/prestamo pagar\` para regularizar tu situación.`);
+        }
 
         const apuesta = interaction.options.getInteger('apuesta');
         const userId = interaction.user.id;
@@ -74,35 +79,22 @@ module.exports = {
             .single();
 
         if (!user) {
-            return interaction.editReply('Usa /daily primero.');
+            return interaction.editReply('❌ No tienes una cuenta. Usa /daily primero.');
         }
 
         if (user.balance < apuesta) {
-            return interaction.editReply(`No tienes suficientes monedas. Saldo actual: ${user.balance}`);
+            return interaction.editReply(`❌ ALTO AHÍ!! No tienes suficientes monedas. Saldo actual: ${user.balance}`);
         }
 
         if (blackjackGames.has(userId)) {
-            return interaction.editReply('Ya tienes una partida activa.');
+            return interaction.editReply('❌ ALTO AHÍ!! Ya tienes una partida activa.');
         }
 
         const mazo = crearMazo();
+        const jugador = [mazo.pop(), mazo.pop()];
+        const dealer = [mazo.pop(), mazo.pop()];
 
-        const jugador = [
-            mazo.pop(),
-            mazo.pop()
-        ];
-
-        const dealer = [
-            mazo.pop(),
-            mazo.pop()
-        ];
-
-        blackjackGames.set(userId, {
-            apuesta,
-            mazo,
-            jugador,
-            dealer
-        });
+        blackjackGames.set(userId, true);
 
         const botones = new ActionRowBuilder()
             .addComponents(
@@ -110,56 +102,118 @@ module.exports = {
                     .setCustomId(`bj_hit_${userId}`)
                     .setLabel('🃏 Pedir')
                     .setStyle(ButtonStyle.Primary),
-
                 new ButtonBuilder()
                     .setCustomId(`bj_stand_${userId}`)
                     .setLabel('✋ Plantarse')
                     .setStyle(ButtonStyle.Danger)
             );
 
-        const totalJugador = calcularTotal(jugador);
+        let totalJugador = calcularTotal(jugador);
 
-        const mensaje = `
-🃏 **BLACKJACK VEGAS**
-
-Tus cartas:
-${jugador.map(c => c.carta).join(' ')}
-
-Total: **${totalJugador}**
-
-Dealer:
-${dealer[0].carta} ❓
-
-⏰ Tienes 60 segundos.
-`;
-
-        await interaction.editReply({
-            content: mensaje,
+        const respuesta = await interaction.editReply({
+            content: `🃏 **BLACKJACK VEGAS**\n\nTus cartas:\n${jugador.map(c => c.carta).join(' ')}\nTotal: **${totalJugador}**\n\nDealer:\n${dealer[0].carta} ❓\n\n⏰ Tienes 60 segundos.`,
             components: [botones]
         });
 
-        setTimeout(async () => {
+        const collector = respuesta.createMessageComponentCollector({
+            componentType: ComponentType.Button,
+            time: 60000
+        });
 
-            if (!blackjackGames.has(userId)) return;
+        collector.on('collect', async i => {
+            if (i.user.id !== userId) {
+                return i.reply({
+                    content: '🚫 Esta no es tu partida.',
+                    ephemeral: true
+                });
+            }
 
-            const partida = blackjackGames.get(userId);
+            if (i.customId === `bj_hit_${userId}`) {
+                jugador.push(mazo.pop());
+                totalJugador = calcularTotal(jugador);
 
+                if (totalJugador > 21) {
+                    await i.deferUpdate();
+                    collector.stop('busto');
+                } else {
+                    await i.update({
+                        content: `🃏 **BLACKJACK VEGAS**\n\nTus cartas:\n${jugador.map(c => c.carta).join(' ')}\nTotal: **${totalJugador}**\n\nDealer:\n${dealer[0].carta} ❓\n\n⏰ Tienes 60 segundos.`
+                    });
+                }
+            } else if (i.customId === `bj_stand_${userId}`) {
+                await i.deferUpdate();
+                collector.stop('stand');
+            }
+        });
+
+        collector.on('end', async (collected, reason) => {
             blackjackGames.delete(userId);
+            
+            let totalDealer = calcularTotal(dealer);
+            let resultadoTexto = '';
+            let balanceFinal = Number(user.balance);
+
+            if (reason === 'busto') {
+                balanceFinal -= apuesta;
+                resultadoTexto = `💀 Te pasaste de 21. Perdiste **${apuesta}** monedas.`;
+            } else {
+                while (totalDealer < 17) {
+                    dealer.push(mazo.pop());
+                    totalDealer = calcularTotal(dealer);
+                }
+
+                if (totalDealer > 21) {
+                    balanceFinal += apuesta;
+                    resultadoTexto = `🎉 El dealer se pasó de 21. Ganaste **${apuesta}** monedas.`;
+                } else if (totalJugador > totalDealer) {
+                    balanceFinal += apuesta;
+                    resultadoTexto = `🎉 Ganaste **${apuesta}** monedas.`;
+                } else if (totalDealer > totalJugador) {
+                    balanceFinal -= apuesta;
+                    resultadoTexto = `💀 El dealer gana. Perdiste **${apuesta}** monedas.`;
+                } else {
+                    resultadoTexto = `🤝 Empate. Recuperas tu apuesta.`;
+                }
+            }
+
+            if (reason === 'time') {
+                balanceFinal -= apuesta;
+                resultadoTexto = `⏰ Tiempo agotado. Perdiste **${apuesta}** monedas por inactividad.`;
+            }
+
+            if (balanceFinal !== Number(user.balance)) {
+                try {
+                    await supabase
+                        .from('perfiles_economia')
+                        .update({ balance: balanceFinal })
+                        .eq('discord_id', userId);
+                } catch (error) {
+                    console.error(error);
+                }
+            }
+
+            if (balanceFinal < Number(user.balance)) {
+                const { procesarSeguro } = require('../utils/handleSeguro');
+                const resultadoSeguro = await procesarSeguro(userId, apuesta);
+                
+                if (resultadoSeguro.tituloDerrota === 'Derrota Asegurada') {
+                    const reembolso = Math.floor(apuesta * 0.25);
+                    balanceFinal += reembolso;
+                    resultadoTexto += `\n\n🛡️ **${resultadoSeguro.tituloDerrota}:** ${resultadoSeguro.descripcionDerrota}`;
+                }
+            }
+
+            const cartasJugadorStr = jugador.map(c => c.carta).join(' ');
+            const cartasDealerStr = dealer.map(c => c.carta).join(' ');
 
             try {
-
-                await interaction.editReply({
-                    content:
-`⏰ Tiempo agotado.
-
-${interaction.user} se plantó automáticamente.
-
-(La lógica del dealer se agregará en el siguiente paso.)`,
+                await respuesta.edit({
+                    content: `🃏 **RESULTADO FINAL**\n\nTus cartas:\n${cartasJugadorStr} (Total: **${totalJugador}**)\n\nDealer:\n${cartasDealerStr} (Total: **${totalDealer}**)\n\n${resultadoTexto}\n💰 Saldo actual: **${balanceFinal}**`,
                     components: []
                 });
-
-            } catch {}
-
-        }, 60000);
+            } catch (error) {
+                console.error(error);
+            }
+        });
     }
 };

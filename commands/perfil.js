@@ -1,104 +1,97 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const supabase = require('../supabase');
+const { getUserWithBuffs, getTotalBuffValue } = require('../utils/handleUser');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('perfil')
-        .setDescription('Muestra tu perfil económico'),
+        .setDescription('Muestra tu balance, título y mascota equipada'),
 
     async execute(interaction) {
-
         const discordId = interaction.user.id;
 
         try {
+            await interaction.deferReply();
 
-            // Obtener perfil económico
+            const userData = await getUserWithBuffs(discordId);
 
-            const { data: perfil, error: perfilError } = await supabase
-                .from('perfiles_economia')
-                .select('*')
+            if (!userData || !userData.profile) {
+                return interaction.editReply('❌ No tienes un perfil económico registrado. Usa `/daily` primero.');
+            }
+
+            const perfil = userData.profile;
+
+            const { data: invTitulos } = await supabase
+                .from('inventario_titulos')
+                .select('titles(name)')
                 .eq('discord_id', discordId)
-                .single();
+                .eq('equiped', true)
+                .maybeSingle();
 
-            if (perfilError || !perfil) {
-                return interaction.reply({
-                    content: '❌ No tienes perfil económico.',
-                    ephemeral: true
-                });
-            }
+            const tituloActivo = invTitulos && invTitulos.titles ? invTitulos.titles.name : 'Ninguno';
 
-            // Obtener inventario con nombres
+            const suerteBuff = getTotalBuffValue(userData.buffs, 'suerte');
+            const suerteTotal = 50 + suerteBuff;
 
-            const { data: inventario, error: inventarioError } = await supabase
-                .from('inventario_usuario')
-                .select(`
-                    item_id,
-                    tienda (
-                        nombre,
-                        tipo
-                    )
-                `)
-                .eq('discord_id', discordId);
-
-            if (inventarioError) {
-                console.error(inventarioError);
-            }
-
-            let itemsTexto = 'Sin artículos';
-
-            if (inventario && inventario.length > 0) {
-
-                itemsTexto = inventario
-                    .map(item => `• ${item.tienda.nombre}`)
-                    .join('\n');
-
-            }
-
-            // Buscar títulos
-
-            const titulos = inventario
-                ?.filter(item => item.tienda.tipo === 'title')
-                .map(item => item.tienda.nombre);
-
-            const tituloActivo = titulos?.length
-                ? titulos[0]
-                : 'Sin título';
+            const xpActual = Number(perfil.xp) || 0;
+            const nivelActual = Number(perfil.nivel) || 1;
+            const xpRequerido = 100 * (nivelActual * nivelActual);
+            const porcentajeLlenado = Math.min(((xpActual / xpRequerido) * 100), 100).toFixed(1);
+            const barraLlena = Math.min(Math.floor(porcentajeLlenado / 10), 10);
+            const barraVacia = 10 - barraLlena;
+            const representacionVisual = '🟩'.repeat(barraLlena) + '⬛'.repeat(barraVacia);
 
             const embed = new EmbedBuilder()
                 .setTitle(`👤 Perfil de ${interaction.user.username}`)
                 .setColor(0x00AEFF)
                 .addFields(
                     {
+                        name: '🎖️ Nivel y Experiencia',
+                        value: `**Nivel ${nivelActual}**\n${representacionVisual} **${porcentajeLlenado}%**\n(${xpActual.toLocaleString()} / ${xpRequerido.toLocaleString()} XP)`,
+                        inline: false
+                    },
+                    {
                         name: '💰 Saldo',
                         value: perfil.balance.toLocaleString(),
                         inline: true
                     },
                     {
-                        name: '🏆 Título',
+                        name: '🏆 Título Equipado',
                         value: tituloActivo,
                         inline: true
                     },
                     {
-                        name: '📦 Artículos',
-                        value: itemsTexto
+                        name: '🍀 Suerte',
+                        value: `${suerteTotal}%`,
+                        inline: true
                     }
                 )
                 .setThumbnail(interaction.user.displayAvatarURL());
 
-            await interaction.reply({
-                embeds: [embed]
-            });
+            if (userData.activePet) {
+                let buffosText = 'Sin buffos';
+                if (userData.buffs && userData.buffs.length > 0) {
+                    buffosText = userData.buffs
+                        .map(b => `• **${b.boost_type.toUpperCase()}**: +${b.boost_percentage}%`)
+                        .join('\n');
+                }
+
+                embed.addFields({
+                    name: '━━━━━━━━ 🐾 MASCOTA ACTIVA ━━━━━━━━',
+                    value: `**${userData.activePet.title}**\n${buffosText}`
+                });
+            } else {
+                embed.addFields({
+                    name: '━━━━━━━━ 🐾 MASCOTA ACTIVA ━━━━━━━━',
+                    value: 'No tienes ninguna mascota equipada.'
+                });
+            }
+
+            await interaction.editReply({ embeds: [embed] });
 
         } catch (error) {
-
             console.error(error);
-
-            await interaction.reply({
-                content: '❌ Error al cargar el perfil.',
-                ephemeral: true
-            });
-
+            await interaction.editReply({ content: '❌ Error al cargar tu perfil.' });
         }
-
     }
 };

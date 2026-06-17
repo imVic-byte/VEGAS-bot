@@ -2,7 +2,6 @@ require('dotenv').config();
 const fs = require('node:fs');
 const path = require('node:path');
 const { Client, Collection, GatewayIntentBits } = require('discord.js');
-const blackjackGames = require('./blackjackGames');
 
 const client = new Client({
     intents: [
@@ -23,331 +22,235 @@ for (const file of commandFiles) {
         client.commands.set(command.data.name, command);
     }
 }
-function calcularTotal(cartas) {
 
-    let total = 0;
-    let ases = 0;
-
-    for (const carta of cartas) {
-
-        if (['J', 'Q', 'K'].includes(carta.valor)) {
-            total += 10;
-        }
-        else if (carta.valor === 'A') {
-            total += 11;
-            ases++;
-        }
-        else {
-            total += parseInt(carta.valor);
-        }
-
-    }
-
-    while (total > 21 && ases > 0) {
-        total -= 10;
-        ases--;
-    }
-
-    return total;
-}
-
-client.once('clientReady', () => {
+client.once('ready', () => {
     console.log('VEGAS listo');
 });
 
+const xpCooldowns = new Map();
+
+client.on('messageCreate', async message => {
+    // Ignorar si el mensaje es de un bot o si es por mensajes directos
+    if (message.author.bot || message.channel.type === 1) return;
+
+    const discordId = message.author.id;
+
+    // Evaluar cooldown
+    if (xpCooldowns.has(discordId)) return;
+
+    // Activar cooldown de 60 segundos
+    xpCooldowns.set(discordId, true);
+    setTimeout(() => {
+        xpCooldowns.delete(discordId);
+    }, 60000);
+
+    // Calcular XP aleatorio (15 a 25)
+    const xpRandom = Math.floor(Math.random() * (25 - 15 + 1)) + 15;
+
+    // Procesar XP
+    const { agregarXp } = require('./utils/xpManager');
+    const resultado = await agregarXp(discordId, xpRandom);
+
+    if (resultado && resultado.subioDeNivel) {
+        message.channel.send(`🎉 ¡Felicidades <@${discordId}>! Tu actividad en el chat te ha otorgado la experiencia necesaria para alcanzar el **Nivel ${resultado.nuevoNivel}**.`);
+    }
+});
+
 client.on('interactionCreate', async interaction => {
-
-    // Slash Commands
-    if (interaction.isChatInputCommand()) {
-
-        const command = interaction.client.commands.get(interaction.commandName);
-
-        if (!command) return;
-
+    if (interaction.isButton()) {
         try {
-            await command.execute(interaction);
+            if (interaction.customId.startsWith('buy_')) {
+                const parts = interaction.customId.split('_');
+                const type = parts[1];
+                const id = parseInt(parts[2]);
+                const { procesarCompra } = require('./utils/handleCompras');
+                await procesarCompra(interaction, type, id);
+                return;
+            }
+            if (interaction.customId.startsWith('duelo_victoria_') || interaction.customId.startsWith('duelo_derrota_')) {
+                const parts = interaction.customId.split('_');
+                const type = parts[1];
+                const uuid = parts.slice(2).join('_');
+                const { procesarReporteDuelo } = require('./utils/handleDuelos');
+                await procesarReporteDuelo(interaction, type, uuid);
+                return;
+            }
+            if (interaction.customId.startsWith('shop_page_')) {
+                const parts = interaction.customId.split('_');
+                const category = parts[2];
+                const page = parseInt(parts[3]);
+                const shopCommand = interaction.client.commands.get('shop');
+                if (shopCommand && shopCommand.handlePagination) {
+                    await shopCommand.handlePagination(interaction, category, page);
+                }
+                return;
+            }
         } catch (error) {
             console.error(error);
+            const errorPayload = { content: 'Hubo un error al procesar el botón.', ephemeral: true };
+            if (interaction.replied || interaction.deferred) {
+                await interaction.followUp(errorPayload);
+            } else {
+                await interaction.reply(errorPayload);
+            }
         }
     }
 
-    // Botones
-    if (interaction.isButton()) {
-
-        console.log('Botón:', interaction.customId);
-
-        // =====================
-        // MENDIGAR
-        // =====================
-        if (interaction.customId.startsWith('beg_')) {
-
-            const supabase = require('./supabase');
-
-            const partes = interaction.customId.split('_');
-
-            const mendigoId = partes[1];
-            const cantidad = parseInt(partes[2]);
-
-            const donanteId = interaction.user.id;
-
-            if (donanteId === mendigoId) {
-                return interaction.reply({
-                    content: 'No puedes donar a tu propia solicitud.',
-                    ephemeral: true
-                });
-            }
-
-            const { data: donante } = await supabase
-                .from('perfiles_economia')
-                .select('*')
-                .eq('discord_id', donanteId)
-                .single();
-
-            if (!donante) {
-                return interaction.reply({
-                    content: 'No tienes una cuenta económica. Usa /daily primero.',
-                    ephemeral: true
-                });
-            }
-
-            if (Number(donante.balance) < cantidad) {
-                return interaction.reply({
-                    content: `No tienes suficientes monedas. Necesitas ${cantidad}.`,
-                    ephemeral: true
-                });
-            }
-
-            const { data: mendigo } = await supabase
-                .from('perfiles_economia')
-                .select('*')
-                .eq('discord_id', mendigoId)
-                .single();
-
-            if (!mendigo) {
-                return interaction.reply({
-                    content: 'La solicitud ya no es válida.',
-                    ephemeral: true
-                });
-            }
-
-            await supabase
-                .from('perfiles_economia')
-                .update({
-                    balance: Number(donante.balance) - cantidad
-                })
-                .eq('discord_id', donanteId);
-
-            await supabase
-                .from('perfiles_economia')
-                .update({
-                    balance: Number(mendigo.balance) + cantidad
-                })
-                .eq('discord_id', mendigoId);
-
-            await interaction.reply({
-                content: `💸 Has donado ${cantidad} monedas.`,
-                ephemeral: true
-            });
-
-            await interaction.message.edit({
-                content: `💸 <@${interaction.user.id}> donó ${cantidad} monedas a <@${mendigoId}>.`,
-                components: []
-            });
-
-            return;
-        }
-
-        // =====================
-        // BLACKJACK
-        // =====================
-        if (interaction.customId.startsWith('bj_')) {
-
-        const supabase = require('./supabase');
-
-        const partes = interaction.customId.split('_');
-
-        const accion = partes[1];
-        const userId = partes[2];
-
-        if (interaction.user.id !== userId) {
-            return interaction.reply({
-                content: 'Esta no es tu partida.',
-                ephemeral: true
-            });
-        }
-
-        const partida = blackjackGames.get(userId);
-
-        if (!partida) {
-            return interaction.reply({
-                content: 'La partida ya terminó.',
-                ephemeral: true
-            });
-        }
-
-        // ==================
-        // PEDIR CARTA
-        // ==================
-        if (accion === 'hit') {
-
-            const nuevaCarta = partida.mazo.pop();
-
-            partida.jugador.push(nuevaCarta);
-
-            const totalJugador = calcularTotal(partida.jugador);
-
-            blackjackGames.set(userId, partida);
-
-            // SE PASÓ
-            if (totalJugador > 21) {
-
-                const { data: user } = await supabase
-                    .from('perfiles_economia')
-                    .select('balance')
-                    .eq('discord_id', userId)
-                    .single();
-
-                const nuevoBalance =
-                    Number(user.balance) - partida.apuesta;
-
-                await supabase
-                    .from('perfiles_economia')
-                    .update({
-                        balance: nuevoBalance
-                    })
-                    .eq('discord_id', userId);
-
-                blackjackGames.delete(userId);
-
-                return interaction.update({
-                    content:
-                        `💥 TE PASASTE
-
-                        Cartas:
-                        ${partida.jugador.map(c => c.carta).join(' ')}
-
-                        Total: ${totalJugador}
-
-                        💀 Perdiste ${partida.apuesta} monedas.
-
-                        💰 Saldo actual: ${nuevoBalance}`,
+    if (interaction.isStringSelectMenu()) {
+        try {
+            if (interaction.customId === 'gestionar_roles') {
+                await interaction.deferUpdate();
+                
+                const selectedRoleIds = interaction.values;
+                const discordId = interaction.user.id;
+                
+                const supabase = require('./supabase');
+                const { data: invRoles, error } = await supabase
+                    .from('inventario_roles')
+                    .select('roles(discord_role_id)')
+                    .eq('discord_id', discordId);
+                    
+                if (error || !invRoles) {
+                    return interaction.followUp({ content: '❌ Hubo un error verificando tu inventario.', ephemeral: true });
+                }
+                
+                const ownedDiscordRoleIds = invRoles
+                    .map(item => item.roles?.discord_role_id)
+                    .filter(id => id);
+                
+                const member = await interaction.guild.members.fetch(discordId);
+                
+                for (const roleId of ownedDiscordRoleIds) {
+                    const shouldHave = selectedRoleIds.includes(roleId);
+                    const currentlyHas = member.roles.cache.has(roleId);
+                    
+                    if (shouldHave && !currentlyHas) {
+                        await member.roles.add(roleId).catch(console.error);
+                    } else if (!shouldHave && currentlyHas) {
+                        await member.roles.remove(roleId).catch(console.error);
+                    }
+                }
+                
+                await interaction.editReply({
+                    content: '✅ ¡Tus roles han sido actualizados correctamente!',
+                    embeds: [],
                     components: []
                 });
-
+                return;
             }
 
-            return interaction.update({
-                content:
-                    `🃏 BLACKJACK VEGAS
+            if (interaction.customId === 'gestionar_mascotas') {
+                await interaction.deferUpdate();
+                
+                const selectedIds = interaction.values;
+                const discordId = interaction.user.id;
+                const supabase = require('./supabase');
+                
+                const { error: unequipError } = await supabase
+                    .from('inventario_mascotas')
+                    .update({ equiped: false })
+                    .eq('discord_id', discordId);
+                    
+                if (unequipError) {
+                    console.error('Error desequipando mascotas:', unequipError);
+                    return interaction.followUp({ content: '❌ Hubo un error al actualizar tus mascotas.', ephemeral: true });
+                }
+                
+                if (selectedIds.length > 0) {
+                    const { error: equipError } = await supabase
+                        .from('inventario_mascotas')
+                        .update({ equiped: true })
+                        .eq('discord_id', discordId)
+                        .eq('id', selectedIds[0]);
+                        
+                    if (equipError) {
+                        console.error('Error equipando mascota:', equipError);
+                        return interaction.followUp({ content: '❌ Hubo un error al equipar la mascota.', ephemeral: true });
+                    }
+                }
+                
+                await interaction.editReply({
+                    content: '✅ ¡Tu mascota activa ha sido actualizada correctamente!',
+                    embeds: [],
+                    components: []
+                });
+                return;
+            }
 
-                    Tus cartas:
-                    ${partida.jugador.map(c => c.carta).join(' ')}
-
-                    Total: ${totalJugador}
-
-                    Dealer:
-                    ${partida.dealer[0].carta} ❓
-
-                    ⏰ Sigue jugando.`,
-                components: interaction.message.components
-            });
-
+            if (interaction.customId === 'gestionar_titulos') {
+                await interaction.deferUpdate();
+                
+                const selectedIds = interaction.values;
+                const discordId = interaction.user.id;
+                const supabase = require('./supabase');
+                
+                const { error: unequipError } = await supabase
+                    .from('inventario_titulos')
+                    .update({ equiped: false })
+                    .eq('discord_id', discordId);
+                    
+                if (unequipError) {
+                    console.error('Error desequipando títulos:', unequipError);
+                    return interaction.followUp({ content: '❌ Hubo un error al actualizar tus títulos.', ephemeral: true });
+                }
+                
+                if (selectedIds.length > 0) {
+                    const { error: equipError } = await supabase
+                        .from('inventario_titulos')
+                        .update({ equiped: true })
+                        .eq('discord_id', discordId)
+                        .eq('id', selectedIds[0]);
+                        
+                    if (equipError) {
+                        console.error('Error equipando título:', equipError);
+                        return interaction.followUp({ content: '❌ Hubo un error al equipar el título.', ephemeral: true });
+                    }
+                }
+                
+                await interaction.editReply({
+                    content: '✅ ¡Tu título activo ha sido actualizado correctamente!',
+                    embeds: [],
+                    components: []
+                });
+                return;
+            }
+        } catch (error) {
+            console.error(error);
+            if (interaction.replied || interaction.deferred) {
+                await interaction.followUp({ content: 'Hubo un error al procesar el menú.', ephemeral: true });
+            } else {
+                await interaction.reply({ content: 'Hubo un error al procesar el menú.', ephemeral: true });
+            }
         }
+    }
 
-        // ==================
-        // PLANTARSE
-        // ==================
-        if (accion === 'stand') {
+    if (!interaction.isChatInputCommand()) return;
 
-            while (calcularTotal(partida.dealer) < 17) {
-                partida.dealer.push(partida.mazo.pop());
-            }
+    const command = interaction.client.commands.get(interaction.commandName);
 
-            const totalJugador = calcularTotal(partida.jugador);
-            const totalDealer = calcularTotal(partida.dealer);
+    if (!command) return;
 
-            const { data: user } = await supabase
-                .from('perfiles_economia')
-                .select('balance')
-                .eq('discord_id', userId)
-                .single();
+    try {
+        await command.execute(interaction);
 
-            let nuevoBalance = Number(user.balance);
-            let resultado = '';
-
-            // Dealer se pasa
-            if (totalDealer > 21) {
-
-                nuevoBalance += partida.apuesta;
-
-                resultado =
-                    `🎉 El dealer se pasó de 21.\nGanaste ${partida.apuesta} monedas.`;
-
-            }
-
-            // Jugador gana
-            else if (totalJugador > totalDealer) {
-
-                nuevoBalance += partida.apuesta;
-
-                resultado =
-                    `🎉 Ganaste ${partida.apuesta} monedas.`;
-
-            }
-
-            // Dealer gana
-            else if (totalDealer > totalJugador) {
-
-                nuevoBalance -= partida.apuesta;
-
-                resultado =
-                    `💀 Perdiste ${partida.apuesta} monedas.`;
-
-            }
-
-            // Empate
-            else {
-
-                resultado =
-                    `🤝 Empate. No ganas ni pierdes monedas.`;
-
-            }
-
-            await supabase
-                .from('perfiles_economia')
-                .update({
-                    balance: nuevoBalance
-                })
-                .eq('discord_id', userId);
-
-            blackjackGames.delete(userId);
-
-            return interaction.update({
-                content:
-                    `🃏 BLACKJACK FINAL
-
-                    Tus cartas:
-                    ${partida.jugador.map(c => c.carta).join(' ')}
-
-                    Total: ${totalJugador}
-
-                    Dealer:
-                    ${partida.dealer.map(c => c.carta).join(' ')}
-
-                    Total Dealer: ${totalDealer}
-
-                    ${resultado}
-
-                    💰 Saldo actual: ${nuevoBalance}`,
-                components: []
-            });
-
+        // Procesar ganancia de XP estática por utilizar comandos de barra exitosamente (+15)
+        const { agregarXp } = require('./utils/xpManager');
+        const resultado = await agregarXp(interaction.user.id, 15);
+        
+        if (resultado && resultado.subioDeNivel) {
+            // Se envía un canal limpio ya que algunos comandos utilizan reply/editReply de forma asíncrona
+            await interaction.channel.send(`🎉 ¡Felicidades <@${interaction.user.id}>! Gracias al uso del casino has alcanzado el **Nivel ${resultado.nuevoNivel}** en tu perfil.`);
         }
+    } catch (error) {
+        console.error(error);
+        const errorPayload = { content: 'Hubo un error al ejecutar este comando.', ephemeral: true };
 
+        if (interaction.replied || interaction.deferred) {
+            await interaction.followUp(errorPayload);
+        } else {
+            await interaction.reply(errorPayload);
+        }
     }
-    }
-    
-
 });
 
 client.login(process.env.DISCORD_TOKEN);
