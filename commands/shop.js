@@ -92,7 +92,18 @@ module.exports = {
             } else if (category === 'item') {
                 name = item.nombre;
                 price = item.precio_base;
-                extra = `Usos: ${item.usos_iniciales}`;
+                
+                let descFija = item.descripcion || '';
+                if (!descFija) {
+                    if (id === 1) descFija = 'Multiplica x2 tu experiencia ganada por comandos.';
+                    else if (id === 2) descFija = 'Inmunidad a tu próximo asalto (Pagas multa de 1000).';
+                    else if (id === 3) descFija = 'Evade el impuesto del 12% en transferencias.';
+                    else if (id === 4) descFija = 'Recupera el 25% del monto de tu apuesta si pierdes.';
+                    else if (id === 5) descFija = 'Eleva tu límite crediticio y extiende el plazo de pago a 72h.';
+                }
+                
+                let tiempo = item.duracion_minutos > 0 ? ` | Duración: ${item.duracion_minutos / 60} horas` : '';
+                extra = `Usos: ${item.usos_iniciales}${tiempo}\n*${descFija}*`;
             }
 
             const impuesto = Math.floor(price * 0.10);
