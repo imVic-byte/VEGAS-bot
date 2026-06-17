@@ -8,7 +8,7 @@ async function procesarSeguro(discordId, montoApostado) {
         .from('inventario_items')
         .select('*')
         .eq('discord_id', discordId)
-        .eq('item_id', 'seguro_casino')
+        .eq('item_id', 4)
         .gt('usos_restantes', 0)
         .single();
 

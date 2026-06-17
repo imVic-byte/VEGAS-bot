@@ -48,7 +48,7 @@ module.exports = {
                 .from('inventario_items')
                 .select('*')
                 .eq('discord_id', userId)
-                .eq('item_id', 'tarjeta_platinum')
+                .eq('item_id', 5)
                 .single();
 
             const esPlatinum = !!tarjeta;
