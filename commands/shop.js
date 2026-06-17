@@ -37,8 +37,8 @@ module.exports = {
             list = await getRoles() || [];
             title = '🎭 Tienda de Roles';
         } else if (category === 'titulo') {
-            const { getTitulos } = require('../utils/handleTitulos');
-            list = await getTitulos() || [];
+            const { getTitles } = require('../utils/handleTitulos');
+            list = await getTitles() || [];
             title = '🏷️ Tienda de Títulos';
         } else if (category === 'boveda') {
             const { data } = await supabase.from('tienda_bovedas').select('*').order('nivel_requerido', { ascending: true });
@@ -66,6 +66,7 @@ module.exports = {
 
         let desc = '';
         const buttons = [];
+        let indexOnPage = 1;
 
         for (const item of currentItems) {
             const id = item.id;
@@ -95,14 +96,16 @@ module.exports = {
             }
 
             const impuesto = Math.floor(price * 0.10);
-            desc += `**${name}**\nPrecio Base: ${price} | IVA: ${impuesto} | Total: ${price + impuesto}\n${extra ? `*${extra}*\n` : ''}\n`;
+            desc += `**[${indexOnPage}] ${name}**\nPrecio Base: ${price} | IVA: ${impuesto} | Total: ${price + impuesto}\n${extra ? `*${extra}*\n` : ''}\n`;
 
             buttons.push(
                 new ButtonBuilder()
                     .setCustomId(`buy_${category}_${id}`)
-                    .setLabel(String(id))
+                    .setLabel(String(indexOnPage))
                     .setStyle(ButtonStyle.Success)
             );
+            
+            indexOnPage++;
         }
 
         embed.setDescription(desc || 'No hay artículos disponibles en esta categoría.');

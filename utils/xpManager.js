@@ -24,7 +24,7 @@ async function agregarXp(discordId, cantidadBaseXp) {
             .from('inventario_items')
             .select('*')
             .eq('discord_id', discordId)
-            .eq('item_id', 'estimulante_xp')
+            .eq('item_id', 1)
             .gt('expira_el', nowIso)
             .single();
 

@@ -133,10 +133,22 @@ async function procesarCompra(interaction, itemType, itemId) {
             .limit(1);
 
         if (existingItem && existingItem.length > 0) {
-            return interaction.reply({
-                content: `❌ Ya posees el artículo **${itemName}** en tu inventario.`,
-                ephemeral: true
-            });
+            if (itemType === 'item' && existingItem[0].expira_el) {
+                const nowIso = new Date().toISOString();
+                if (existingItem[0].expira_el < nowIso) {
+                    await supabase.from(inventoryTableName).delete().eq('id', existingItem[0].id);
+                } else {
+                    return interaction.reply({
+                        content: `❌ Ya posees el artículo **${itemName}** activo en tu inventario.`,
+                        ephemeral: true
+                    });
+                }
+            } else {
+                return interaction.reply({
+                    content: `❌ Ya posees el artículo **${itemName}** en tu inventario.`,
+                    ephemeral: true
+                });
+            }
         }
 
         // Verificar saldo e impuestos

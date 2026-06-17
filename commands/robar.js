@@ -80,7 +80,7 @@ module.exports = {
             .from('inventario_items')
             .select('*')
             .eq('discord_id', victima.id)
-            .eq('item_id', 'maletin_oculto')
+            .eq('item_id', 2)
             .gt('usos_restantes', 0)
             .single();
 
