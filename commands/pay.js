@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const supabase = require('../supabase');
 
 module.exports = {
@@ -74,10 +74,35 @@ module.exports = {
             receptorData = nuevoReceptor;
         }
 
-        const nuevoSaldoEmisor = Number(emisor.balance) - cantidad;
-        const nuevoSaldoReceptor = Number(receptorData.balance) + cantidad;
+        const { data: paseFiscal } = await supabase
+            .from('inventario_items')
+            .select('*')
+            .eq('discord_id', emisorId)
+            .eq('item_id', 3)
+            .gt('usos_restantes', 0)
+            .single();
 
-        // Actualizar emisor
+        let impuesto = 0;
+        let porcentajeFiscal = 0;
+
+        if (paseFiscal) {
+            porcentajeFiscal = 0;
+            const usos = paseFiscal.usos_restantes - 1;
+            if (usos <= 0) {
+                await supabase.from('inventario_items').delete().eq('id', paseFiscal.id);
+            } else {
+                await supabase.from('inventario_items').update({ usos_restantes: usos }).eq('id', paseFiscal.id);
+            }
+        } else {
+            porcentajeFiscal = 12;
+            impuesto = Math.floor(cantidad * 0.12);
+        }
+
+        const neto = cantidad - impuesto;
+
+        const nuevoSaldoEmisor = Number(emisor.balance) - cantidad;
+        const nuevoSaldoReceptor = Number(receptorData.balance) + neto;
+
         const { error: updateEmisorError } = await supabase
             .from('perfiles_economia')
             .update({ balance: nuevoSaldoEmisor })
@@ -88,7 +113,6 @@ module.exports = {
             return interaction.editReply('Error al descontar monedas.');
         }
 
-        // Actualizar receptor
         const { error: updateReceptorError } = await supabase
             .from('perfiles_economia')
             .update({ balance: nuevoSaldoReceptor })
@@ -99,9 +123,21 @@ module.exports = {
             return interaction.editReply('Error al entregar las monedas.');
         }
 
-        return interaction.editReply(
-            `💸 Has lavado **${cantidad}** monedas a **${receptor.username}**.\n\n` +
-            `Tu nuevo saldo es: **${nuevoSaldoEmisor}** monedas.`
-        );
+        const embedTransferencia = new EmbedBuilder()
+            .setTitle('Transferencia Bancaria')
+            .setColor(paseFiscal ? 0x00FFFF : 0x00FF00)
+            .setDescription(`Has transferido exitosamente **${cantidad}** monedas a **${receptor.username}**.`)
+            .addFields(
+                { name: 'Dinero Enviado', value: `${cantidad} monedas`, inline: true },
+                { name: `Impuesto Fisco (${porcentajeFiscal}%)`, value: `-${impuesto} monedas`, inline: true },
+                { name: 'Destinatario Recibió (Neto)', value: `${neto} monedas`, inline: false },
+                { name: 'Tu Nuevo Saldo', value: `${nuevoSaldoEmisor} monedas`, inline: false }
+            );
+
+        if (paseFiscal) {
+            embedTransferencia.setFooter({ text: 'Exención de impuestos aplicada por Pase Fiscal' });
+        }
+
+        return interaction.editReply({ embeds: [embedTransferencia] });
     },
 };
