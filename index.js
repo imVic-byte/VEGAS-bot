@@ -350,4 +350,10 @@ client.on('interactionCreate', async interaction => {
 
 });
 
-client.login(process.env.DISCORD_TOKEN);
+client.on('error', error => console.error('Discord Client Error:', error));
+client.on('warn', warning => console.warn('Discord Client Warning:', warning));
+client.on('debug', info => console.log('Discord Client Debug:', info));
+
+client.login(process.env.DISCORD_TOKEN).catch(error => {
+    console.error('CRITICAL ERROR: No se pudo iniciar sesión en Discord:', error);
+});
