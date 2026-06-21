@@ -77,7 +77,13 @@ module.exports = {
             if (category === 'mascota') {
                 name = item.title;
                 price = item.price;
-                extra = item.description || '';
+                let buffosText = '';
+                if (item.mascotas_buffos && item.mascotas_buffos.length > 0) {
+                    buffosText = item.mascotas_buffos
+                        .map(b => `${b.boost_type}: +${b.boost_percentage}%`)
+                        .join(', ');
+                }
+                extra = (item.description || '') + (buffosText ? (item.description ? `\nBuffs: ${buffosText}` : `Buffs: ${buffosText}`) : '');
             } else if (category === 'rol') {
                 name = item.title;
                 price = item.price;
