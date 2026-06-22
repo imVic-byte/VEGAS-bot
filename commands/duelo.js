@@ -211,8 +211,7 @@ module.exports = {
 
             // Distribuir fondos
             const pozoBruto = Number(duelo.apuesta) * 2;
-            const impuesto = Math.floor(pozoBruto * 0.05);
-            const premioNeto = pozoBruto - impuesto;
+            const premioNeto = pozoBruto;
 
             const { data: userData } = await supabase
                 .from('perfiles_economia')
@@ -233,8 +232,6 @@ module.exports = {
                 .setColor('Green')
                 .setDescription(`El caso del duelo \`${idDuelo}\` ha sido revisado y dictaminado a favor de <@${ganador.id}>.`)
                 .addFields(
-                    { name: 'Pozo Bruto', value: `${pozoBruto} monedas`, inline: true },
-                    { name: 'Impuesto (5%)', value: `-${impuesto} monedas`, inline: true },
                     { name: 'Premio Entregado', value: `${premioNeto} monedas`, inline: true }
                 );
 

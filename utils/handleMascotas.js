@@ -11,7 +11,8 @@ async function getMascotas() {
       *,
       mascotas_buffos (*)
     `)
-    .eq('is_active', true);
+    .eq('is_active', true)
+    .order('price', { ascending: true });
 
   if (error) {
     console.error('Error fetching mascotas:', error);

@@ -60,8 +60,7 @@ async function procesarReporteDuelo(interaction, type, dueloId) {
         (reporteRetadorActual === 'perdio' && reporteOponenteActual === 'gano');
 
     const pozoBruto = Number(duelo.apuesta) * 2;
-    const impuesto = Math.floor(pozoBruto * 0.05);
-    const premioNeto = pozoBruto - impuesto;
+    const premioNeto = pozoBruto;
 
     if (consensoLimpio) {
         const idGanador = reporteRetadorActual === 'gano' ? duelo.retador_id : duelo.oponente_id;
@@ -85,7 +84,7 @@ async function procesarReporteDuelo(interaction, type, dueloId) {
             .addFields(
                 { name: 'Ganador', value: `<@${idGanador}>`, inline: true },
                 { name: 'Perdedor', value: `<@${idPerdedor}>`, inline: true },
-                { name: 'Desglose del Premio', value: `Pozo Bruto: ${pozoBruto} monedas\nImpuesto Fisco (5%): -${impuesto} monedas\n**Premio Neto: ${premioNeto} monedas**`, inline: false }
+                { name: 'Premio Entregado', value: `${premioNeto} monedas`, inline: false }
             );
 
         return interaction.message.edit({ embeds: [embedExito], components: [] }).catch(console.error);

@@ -1,0 +1,34 @@
+:pencil: NOTAS DEL PARCHE (V1.2.0) — Vegas Bot
+"En este parche nos enfocamos en refinar la experiencia de sigilo para los delincuentes de Vegas, eliminar comisiones bancarias innecesarias en los duelos de honor, y sentar las bases para un ecosistema de mascotas más transparente y saludable para el futuro mercado."
+
+:man_detective: SISTEMA DE ECONOMÍA Y CRIMEN: /robar
+Contexto del Desarrollador
+Actualmente, los robos exitosos saturaban el canal público y arruinaban el "factor sorpresa". Queremos que un atraco perfecto se sienta verdaderamente sigiloso, dándole toda la información al ladrón en privado mientras la víctima descubre el golpe de forma silenciosa por correspondencia privada. Sin embargo, si metes la pata... todo el servidor se enterará de tu desgracia y de cuánto le has pagado a tu víctima.
+
+[NUEVO] Éxito Sigiloso (Mensaje Efímero): Las ejecuciones exitosas de /robar ahora se responden de manera efímera (solo visible para el autor del robo).
+[NUEVO] Notificación Anónima por DM: Al completarse un robo exitoso, la víctima recibirá un Mensaje Directo automático de advertencia:
+:rotating_light: ¡TE HAN ROBADO! :rotating_light: Un ladrón sigiloso se ha llevado parte de tus monedas sin dejar rastro.
+
+Monedas perdidas: -{dinero}
+Nuevo saldo: {balance}
+(El mensaje no revela la identidad del asaltante).
+
+Fracasos Públicos: Si eres atrapado por la policía o si tu víctima portaba un Maletín de Doble Fondo, el fracaso se publicará en el canal de texto abierto detallando:
+Quién intentó robar (ladrón).
+A quién se intentó robar (víctima).
+La cantidad deducida (multa fiscal de 1000 monedas o penalización del 15%).
+Los balances actualizados de ambos implicados.
+:crossed_swords: SISTEMA DE DUELOS: /duelo
+Contexto del Desarrollador
+El Fisco se estaba quedando con una tajada del 5% en duelos donde los jugadores arriesgaban su propio capital en combates de honor. Hemos decidido eliminar este impuesto para incentivar los enfrentamientos de alto nivel. Lo que se apuesta en la arena, se queda en la arena.
+
+[ELIMINADO] Impuesto del Fisco (5%): Se ha removido por completo el impuesto del 5% aplicado tanto en la resolución automática por consenso (handleDuelos.js) como en las dictaminaciones manuales de los moderadores (commands/duelo.js).
+Botín Íntegro: El ganador del duelo ahora recibirá el 100% del pozo bruto acumulado (el doble de la apuesta individual).
+Limpieza de Interfaz: Se actualizaron y simplificaron los embeds de victoria para mostrar directamente el Premio Entregado sin desgloses tributarios.
+:feet: SISTEMA DE MASCOTAS Y TIENDA: /shop
+Contexto del Desarrollador
+Estamos preparando el terreno para un cambio en el mercado. Para asegurar una economía interna robusta, hemos retirado temporalmente del catálogo inicial a los compañeros de más alto rango para evitar hiperinflación. Asimismo, reajustamos los beneficios de algunas mascotas para que cada una tenga un nicho claro y añadimos claridad absoluta en la tienda sobre qué estás comprando exactamente.
+
+[AJUSTE] Retirada de Rango Alto: Se eliminaron ciertas mascotas de niveles superiores del inventario/tienda activa con el fin de optimizar el balance de cara a las próximas actualizaciones del mercado.
+[BALANCE] Ajustes a Buffs: Se recalibraron los multiplicadores y beneficios pasivos que otorgan diversas mascotas para asegurar un juego más equilibrado.
+[CLARIDAD] Buffs en la Tienda: Al ejecutar /shop, ahora se despliega el listado de mascotas detallando con precisión los buffs y estadísticas específicas que otorga cada una antes de realizar la compra.

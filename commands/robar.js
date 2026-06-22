@@ -11,7 +11,7 @@ module.exports = {
                 .setRequired(true)),
 
     async execute(interaction) {
-        await interaction.deferReply();
+        await interaction.deferReply({ ephemeral: true });
 
         const atacanteId = interaction.user.id;
         const victima = interaction.options.getUser('usuario');
@@ -88,7 +88,7 @@ module.exports = {
 
         if (maletin) {
             const usosRestantes = maletin.usos_restantes - 1;
-            
+
             if (usosRestantes <= 0) {
                 await supabase
                     .from('inventario_items')
@@ -111,15 +111,16 @@ module.exports = {
                 .eq('discord_id', atacanteId);
 
             const embedMaletin = new EmbedBuilder()
-                .setTitle('Robo Frustrado por Defensa')
+                .setTitle('🚨 Robo Frustrado por Defensa')
                 .setColor(0xFF0000)
-                .setDescription('Tu intento de robo fracaso estrepitosamente. La victima portaba un Maletin de Doble Fondo.')
+                .setDescription(`**<@${atacanteId}>** intentó robar a **<@${victima.id}>**, pero el robo fracasó porque la víctima portaba un **Maletín de Doble Fondo** de defensa.`)
                 .addFields(
-                    { name: 'Multa del Fisco', value: `-${multaFija} monedas`, inline: true },
-                    { name: 'Tu Nuevo Saldo', value: `${nuevoSaldoAtacante} monedas`, inline: true }
+                    { name: 'Multa del Fisco a Atacante', value: `-${multaFija} monedas`, inline: true },
+                    { name: 'Nuevo Saldo del Atacante', value: `${nuevoSaldoAtacante} monedas`, inline: true }
                 );
 
-            return interaction.editReply({ embeds: [embedMaletin] });
+            await interaction.editReply({ content: '❌ El robo ha fallado y se ha publicado la multa en el canal público.' });
+            return interaction.channel.send({ content: `🚨 **¡Robo frustrado!** <@${atacanteId}> intentó robar a <@${victima.id}>.`, embeds: [embedMaletin] });
         }
 
         const exito = Math.random() < 0.50;
@@ -150,17 +151,34 @@ module.exports = {
                     .from('perfiles_economia')
                     .update({ balance: atacanteData.balance })
                     .eq('discord_id', atacanteId);
-                
+
                 return interaction.editReply('Ocurrio un error al sustraer el dinero de la victima. El robo fue cancelado.');
             }
 
             const embedExito = new EmbedBuilder()
                 .setTitle('Robo Exitoso')
                 .setColor(0x00FF00)
-                .setDescription(`Has robado ${montoRobado} monedas (el ${porcentajeRobo} por ciento) a ${victima.username}.`)
+                .setDescription(`Has robado ${montoRobado} monedas (el ${porcentajeRobo}%) a ${victima.username}.`)
                 .addFields(
                     { name: 'Tu Nuevo Saldo', value: `${nuevoSaldoAtacante} monedas`, inline: false }
                 );
+
+            // Notificar a la víctima por DM sin revelar el ladrón
+            try {
+                const embedNotificacion = new EmbedBuilder()
+                    .setTitle('🚨 ¡TE HAN ROBADO! 🚨')
+                    .setColor(0xFF0000)
+                    .setDescription('Un ladrón sigiloso se ha llevado parte de tus monedas sin dejar rastro.')
+                    .addFields(
+                        { name: 'Monedas Perdidas', value: `-${montoRobado} monedas`, inline: true },
+                        { name: 'Tu Nuevo Saldo', value: `${nuevoSaldoVictima} monedas`, inline: true }
+                    )
+                    .setTimestamp();
+
+                await victima.send({ embeds: [embedNotificacion] });
+            } catch (error) {
+                console.error(`No se pudo enviar la notificación de robo a ${victima.username} (DMs cerrados):`, error);
+            }
 
             return interaction.editReply({ embeds: [embedExito] });
 
@@ -195,14 +213,19 @@ module.exports = {
             }
 
             const embedFracaso = new EmbedBuilder()
-                .setTitle('Robo Fallido: Te han Atrapado')
+                .setTitle('🚨 Robo Fallido: Atrapado con las manos en la masa')
                 .setColor(0xFF0000)
-                .setDescription(`El robo fracaso. Pagas una multa de ${montoPenalizacion} monedas (el 15 por ciento de tu dinero) que se transfiere a ${victima.username} como indemnizacion.`)
+                .setDescription(`**<@${atacanteId}>** intentó robar a **<@${victima.id}>**, pero fue atrapado.`)
                 .addFields(
-                    { name: 'Tu Nuevo Saldo', value: `${nuevoSaldoAtacante} monedas`, inline: false }
+                    { name: 'Ladrón', value: `<@${atacanteId}>`, inline: true },
+                    { name: 'Víctima', value: `<@${victima.id}>`, inline: true },
+                    { name: 'Multa Pagada a Víctima', value: `${montoPenalizacion} monedas`, inline: true },
+                    { name: 'Nuevo Saldo del Ladrón', value: `${nuevoSaldoAtacante} monedas`, inline: true },
+                    { name: 'Nuevo Saldo de la Víctima', value: `${nuevoSaldoVictima} monedas`, inline: true }
                 );
 
-            return interaction.editReply({ embeds: [embedFracaso] });
+            await interaction.editReply({ content: '❌ Fuiste atrapado robando y se ha notificado en el canal público.' });
+            return interaction.channel.send({ content: `🚨 **¡Robo fallido!** <@${atacanteId}> intentó robar a <@${victima.id}> y fue atrapado.`, embeds: [embedFracaso] });
         }
     }
 };
