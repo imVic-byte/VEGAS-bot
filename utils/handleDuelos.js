@@ -9,12 +9,14 @@ async function procesarReporteDuelo(interaction, type, dueloId) {
     await interaction.deferUpdate();
 
     const userId = interaction.user.id;
+    const serverId = interaction.guildId;
 
     // Obtener información del duelo
     const { data: duelo, error } = await supabase
         .from('duelos_versus')
         .select('*')
         .eq('id', dueloId)
+        .eq('server_id', serverId)
         .single();
 
     if (error || !duelo) {
@@ -71,10 +73,11 @@ async function procesarReporteDuelo(interaction, type, dueloId) {
             .from('perfiles_economia')
             .select('balance')
             .eq('discord_id', idGanador)
+            .eq('server_id', serverId)
             .single();
 
         const nuevoBalance = Number(userData.balance) + premioNeto;
-        await supabase.from('perfiles_economia').update({ balance: nuevoBalance }).eq('discord_id', idGanador);
+        await supabase.from('perfiles_economia').update({ balance: nuevoBalance }).eq('discord_id', idGanador).eq('server_id', serverId);
         await supabase.from('duelos_versus').update({ estado: 'finalizado' }).eq('id', dueloId);
 
         const embedExito = new EmbedBuilder()

@@ -6,11 +6,12 @@ const supabase = require('../supabase');
  * @param {string} discord_id El ID de Discord del usuario.
  * @returns {Promise<{bloqueado: boolean, deuda?: number}>}
  */
-async function verificarEstadoMorosidad(discord_id) {
+async function verificarEstadoMorosidad(discord_id, serverId) {
     const { data: user, error } = await supabase
         .from('perfiles_economia')
         .select('deuda_prestamo, vencimiento_prestamo')
         .eq('discord_id', discord_id)
+        .eq('server_id', serverId)
         .single();
 
     if (error || !user) {

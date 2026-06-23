@@ -1,6 +1,6 @@
 const supabase = require('../supabase');
 
-async function procesarSeguro(discordId, montoApostado) {
+async function procesarSeguro(discordId, serverId, montoApostado) {
     let tituloDerrota = '';
     let descripcionDerrota = '';
 
@@ -32,6 +32,7 @@ async function procesarSeguro(discordId, montoApostado) {
             .from('perfiles_economia')
             .select('balance')
             .eq('discord_id', discordId)
+            .eq('server_id', serverId)
             .single();
 
         if (usuarioPerfil) {
@@ -39,7 +40,8 @@ async function procesarSeguro(discordId, montoApostado) {
             await supabase
                 .from('perfiles_economia')
                 .update({ balance: balanceRecuperado })
-                .eq('discord_id', discordId);
+                .eq('discord_id', discordId)
+                .eq('server_id', serverId);
         }
 
         tituloDerrota = 'Derrota Asegurada';

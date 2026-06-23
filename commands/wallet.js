@@ -6,6 +6,14 @@ module.exports = {
         .setName('wallet')
         .setDescription('Revisa el estado general de tus finanzas y monedas'),
     async execute(interaction) {
+        const serverId = interaction.guildId;
+        if (!serverId) {
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Este comando solo se puede usar dentro de un servidor.');
+            return interaction.reply({ embeds: [errEmbed], ephemeral: true });
+        }
+
         await interaction.deferReply();
         
         const discordId = interaction.user.id;
@@ -14,10 +22,14 @@ module.exports = {
             .from('perfiles_economia')
             .select('balance, balance_boveda, deuda_prestamo')
             .eq('discord_id', discordId)
+            .eq('server_id', serverId)
             .single();
 
         if (error || !user) {
-            return interaction.editReply('❌ Aún no tienes una cuenta registrada. Usa `/daily` para recibir tus primeras monedas.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Aún no tienes una cuenta registrada. Usa `/daily` para recibir tus primeras monedas.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         const balanceLiquido = Number(user.balance) || 0;

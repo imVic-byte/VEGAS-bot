@@ -10,16 +10,28 @@ module.exports = {
         await interaction.deferReply();
 
         const discordId = interaction.user.id;
+        const serverId = interaction.guildId;
         const reward = 1000;
+
+        if (!serverId) {
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Este comando solo se puede usar dentro de un servidor.');
+            return interaction.editReply({ embeds: [errEmbed] });
+        }
 
         const { data: user, error: selectError } = await supabase
             .from('perfiles_economia')
             .select('*')
             .eq('discord_id', discordId)
+            .eq('server_id', serverId)
             .single();
 
         if (selectError && selectError.code !== 'PGRST116') {
-            return interaction.editReply('Error al contactar con la base de datos.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Error al contactar con la base de datos.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         if (!user) {
@@ -27,15 +39,24 @@ module.exports = {
                 .from('perfiles_economia')
                 .insert([{
                     discord_id: discordId,
+                    server_id: serverId,
                     balance: reward,
                     ultima_recompensa: new Date().toISOString()
                 }]);
 
             if (insertError) {
-                return interaction.editReply('Error al crear tu perfil.');
+                console.error(insertError);
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ Error al crear tu perfil.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
             
-            return interaction.editReply(`Bienvenido a VEGAS. Recibiste ${reward} monedas para empezar. Es momento de apostar !!.`);
+            const welcomeEmbed = new EmbedBuilder()
+                .setColor('Green')
+                .setTitle('🎉 ¡Bienvenido a VEGAS!')
+                .setDescription(`Recibiste **${reward}** monedas para empezar. ¡Es momento de apostar!`);
+            return interaction.editReply({ embeds: [welcomeEmbed] });
         }
 
         const lastReward = new Date(user.ultima_recompensa);
@@ -48,7 +69,11 @@ module.exports = {
             const hoursLeft = Math.floor(timeLeftMs / (1000 * 60 * 60));
             const minutesLeft = Math.floor((timeLeftMs % (1000 * 60 * 60)) / (1000 * 60));
             
-            return interaction.editReply(`Vuelve en ${hoursLeft} horas y ${minutesLeft} minutos para tu siguiente recompensa.`);
+            const cooldownEmbed = new EmbedBuilder()
+                .setColor('Gold')
+                .setTitle('⏳ Recompensa Diaria no Disponible')
+                .setDescription(`Vuelve en **${hoursLeft} horas** y **${minutesLeft} minutos** para tu siguiente recompensa.`);
+            return interaction.editReply({ embeds: [cooldownEmbed] });
         }
 
         const deudaTotal = Number(user.deuda_prestamo) || 0;
@@ -89,10 +114,14 @@ module.exports = {
                 vencimiento_prestamo: nuevoVencimiento,
                 ultima_recompensa: now.toISOString() 
             })
-            .eq('discord_id', discordId);
+            .eq('discord_id', discordId)
+            .eq('server_id', serverId);
 
         if (updateError) {
-            return interaction.editReply('Error al actualizar tu saldo en la base de datos.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Error al actualizar tu saldo en la base de datos.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         const embed = new EmbedBuilder()
@@ -103,7 +132,7 @@ module.exports = {
             );
 
         if (fueEmbargado) {
-            embed.setDescription(`⚠️ **Aviso de Morosidad Activa**\nDebido a que tienes una deuda vencida en el banco, el sistema ha procedido con un **embargo automático** de tus ingresos para amortizar la deuda.`);
+            embed.setDescription(`**Mensaje de El Fisco:**\n\nagradecemos tu contribución forzosa del 90% para el fondo de estabilización de deudas. El 10% restante ha sido liberado en tu billetera con el único propósito de guardarlo y no hacer nada. Míralo bien, porque es lo único que verás hasta que saldes tu morosidad.`);
             embed.addFields(
                 { name: 'Monto Embargado', value: `-${montoEmbargo} monedas`, inline: true },
                 { name: 'Deuda Restante', value: `${nuevaDeuda} monedas`, inline: true }

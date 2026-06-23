@@ -8,15 +8,26 @@ module.exports = {
         .setDescription('Muestra tu balance, título y mascota equipada'),
 
     async execute(interaction) {
+        const serverId = interaction.guildId;
+        if (!serverId) {
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Este comando solo se puede usar dentro de un servidor.');
+            return interaction.reply({ embeds: [errEmbed], ephemeral: true });
+        }
+
         const discordId = interaction.user.id;
 
         try {
             await interaction.deferReply();
 
-            const userData = await getUserWithBuffs(discordId);
+            const userData = await getUserWithBuffs(discordId, serverId, interaction.guild);
 
             if (!userData || !userData.profile) {
-                return interaction.editReply('❌ No tienes un perfil económico registrado. Usa `/daily` primero.');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ No tienes un perfil económico registrado. Usa `/daily` primero.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             const perfil = userData.profile;
@@ -42,7 +53,7 @@ module.exports = {
             const representacionVisual = '🟩'.repeat(barraLlena) + '⬛'.repeat(barraVacia);
 
             const embed = new EmbedBuilder()
-                .setTitle(`👤 Perfil de ${interaction.user.username}`)
+                .setTitle(`👤 Perfil de ${userData.displayName}`)
                 .setColor(0x00AEFF)
                 .addFields(
                     {
@@ -91,7 +102,10 @@ module.exports = {
 
         } catch (error) {
             console.error(error);
-            await interaction.editReply({ content: '❌ Error al cargar tu perfil.' });
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Error al cargar tu perfil.');
+            await interaction.editReply({ embeds: [errEmbed], content: '' });
         }
     }
 };

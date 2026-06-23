@@ -59,8 +59,11 @@ client.on('messageCreate', async message => {
     const xpRandom = Math.floor(Math.random() * (25 - 15 + 1)) + 15;
 
     // Procesar XP
+    const serverId = message.guildId;
+    if (!serverId) return;
+
     const { agregarXp } = require('./utils/xpManager');
-    const resultado = await agregarXp(discordId, xpRandom);
+    const resultado = await agregarXp(discordId, serverId, xpRandom);
 
     if (resultado && resultado.subioDeNivel) {
         message.channel.send(`🎉 ¡Felicidades <@${discordId}>! Tu actividad en el chat te ha otorgado la experiencia necesaria para alcanzar el **Nivel ${resultado.nuevoNivel}**.`);
@@ -111,37 +114,37 @@ client.on('interactionCreate', async interaction => {
         try {
             if (interaction.customId === 'gestionar_roles') {
                 await interaction.deferUpdate();
-                
+
                 const selectedRoleIds = interaction.values;
                 const discordId = interaction.user.id;
-                
+
                 const supabase = require('./supabase');
                 const { data: invRoles, error } = await supabase
                     .from('inventario_roles')
                     .select('roles(discord_role_id)')
                     .eq('discord_id', discordId);
-                    
+
                 if (error || !invRoles) {
                     return interaction.followUp({ content: '❌ Hubo un error verificando tu inventario.', ephemeral: true });
                 }
-                
+
                 const ownedDiscordRoleIds = invRoles
                     .map(item => item.roles?.discord_role_id)
                     .filter(id => id);
-                
+
                 const member = await interaction.guild.members.fetch(discordId);
-                
+
                 for (const roleId of ownedDiscordRoleIds) {
                     const shouldHave = selectedRoleIds.includes(roleId);
                     const currentlyHas = member.roles.cache.has(roleId);
-                    
+
                     if (shouldHave && !currentlyHas) {
                         await member.roles.add(roleId).catch(console.error);
                     } else if (!shouldHave && currentlyHas) {
                         await member.roles.remove(roleId).catch(console.error);
                     }
                 }
-                
+
                 await interaction.editReply({
                     content: '✅ ¡Tus roles han sido actualizados correctamente!',
                     embeds: [],
@@ -152,34 +155,34 @@ client.on('interactionCreate', async interaction => {
 
             if (interaction.customId === 'gestionar_mascotas') {
                 await interaction.deferUpdate();
-                
+
                 const selectedIds = interaction.values;
                 const discordId = interaction.user.id;
                 const supabase = require('./supabase');
-                
+
                 const { error: unequipError } = await supabase
                     .from('inventario_mascotas')
                     .update({ equiped: false })
                     .eq('discord_id', discordId);
-                    
+
                 if (unequipError) {
                     console.error('Error desequipando mascotas:', unequipError);
                     return interaction.followUp({ content: '❌ Hubo un error al actualizar tus mascotas.', ephemeral: true });
                 }
-                
+
                 if (selectedIds.length > 0) {
                     const { error: equipError } = await supabase
                         .from('inventario_mascotas')
                         .update({ equiped: true })
                         .eq('discord_id', discordId)
                         .eq('id', selectedIds[0]);
-                        
+
                     if (equipError) {
                         console.error('Error equipando mascota:', equipError);
                         return interaction.followUp({ content: '❌ Hubo un error al equipar la mascota.', ephemeral: true });
                     }
                 }
-                
+
                 await interaction.editReply({
                     content: '✅ ¡Tu mascota activa ha sido actualizada correctamente!',
                     embeds: [],
@@ -190,34 +193,34 @@ client.on('interactionCreate', async interaction => {
 
             if (interaction.customId === 'gestionar_titulos') {
                 await interaction.deferUpdate();
-                
+
                 const selectedIds = interaction.values;
                 const discordId = interaction.user.id;
                 const supabase = require('./supabase');
-                
+
                 const { error: unequipError } = await supabase
                     .from('inventario_titulos')
                     .update({ equiped: false })
                     .eq('discord_id', discordId);
-                    
+
                 if (unequipError) {
                     console.error('Error desequipando títulos:', unequipError);
                     return interaction.followUp({ content: '❌ Hubo un error al actualizar tus títulos.', ephemeral: true });
                 }
-                
+
                 if (selectedIds.length > 0) {
                     const { error: equipError } = await supabase
                         .from('inventario_titulos')
                         .update({ equiped: true })
                         .eq('discord_id', discordId)
                         .eq('id', selectedIds[0]);
-                        
+
                     if (equipError) {
                         console.error('Error equipando título:', equipError);
                         return interaction.followUp({ content: '❌ Hubo un error al equipar el título.', ephemeral: true });
                     }
                 }
-                
+
                 await interaction.editReply({
                     content: '✅ ¡Tu título activo ha sido actualizado correctamente!',
                     embeds: [],
@@ -247,7 +250,7 @@ client.on('interactionCreate', async interaction => {
         // Procesar ganancia de XP estática por utilizar comandos de barra exitosamente (+15)
         const { agregarXp } = require('./utils/xpManager');
         const resultado = await agregarXp(interaction.user.id, 15);
-        
+
         if (resultado && resultado.subioDeNivel) {
             // Se envía un canal limpio ya que algunos comandos utilizan reply/editReply de forma asíncrona
             await interaction.channel.send(`🎉 ¡Felicidades <@${interaction.user.id}>! Gracias al uso del casino has alcanzado el **Nivel ${resultado.nuevoNivel}** en tu perfil.`);
@@ -263,10 +266,6 @@ client.on('interactionCreate', async interaction => {
         }
     }
 });
-
-client.on('error', error => console.error('Discord Client Error:', error));
-client.on('warn', warning => console.warn('Discord Client Warning:', warning));
-client.on('debug', info => console.log('Discord Client Debug:', info));
 
 client.login(process.env.DISCORD_TOKEN).catch(error => {
     console.error('CRITICAL ERROR: No se pudo iniciar sesión en Discord:', error);

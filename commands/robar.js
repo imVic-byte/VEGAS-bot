@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const supabase = require('../supabase');
+const { sumarAlFisco } = require('../utils/handleFisco');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -11,27 +12,42 @@ module.exports = {
                 .setRequired(true)),
 
     async execute(interaction) {
+        const serverId = interaction.guildId;
+        if (!serverId) {
+            return interaction.reply({ content: '❌ Este comando solo se puede usar dentro de un servidor.', ephemeral: true });
+        }
+
         await interaction.deferReply({ ephemeral: true });
 
         const atacanteId = interaction.user.id;
         const victima = interaction.options.getUser('usuario');
 
         if (atacanteId === victima.id) {
-            return interaction.editReply('No puedes robarte a ti mismo.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ No puedes robarte a ti mismo.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         const { data: atacanteData, error: atacanteError } = await supabase
             .from('perfiles_economia')
             .select('*')
             .eq('discord_id', atacanteId)
+            .eq('server_id', serverId)
             .single();
 
         if (atacanteError || !atacanteData) {
-            return interaction.editReply('No tienes una cuenta economica. Usa /daily primero.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ No tienes una cuenta económica. Usa `/daily` primero.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         if (Number(atacanteData.balance) < 500) {
-            return interaction.editReply('Necesitas al menos 500 monedas en tu balance para poder contratar un ladron.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Necesitas al menos 500 monedas en tu balance para poder contratar un ladrón.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         if (atacanteData.ultimo_robo) {
@@ -44,7 +60,10 @@ module.exports = {
                 const timeLeftMs = msIn30Min - diffInMs;
                 const minutesLeft = Math.floor(timeLeftMs / (1000 * 60));
                 const secondsLeft = Math.floor((timeLeftMs % (1000 * 60)) / 1000);
-                return interaction.editReply(`Debes esperar ${minutesLeft}m y ${secondsLeft}s para volver a robar.`);
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription(`❌ Debes esperar **${minutesLeft}m y ${secondsLeft}s** para volver a robar.`);
+                return interaction.editReply({ embeds: [errEmbed] });
             }
         }
 
@@ -52,14 +71,21 @@ module.exports = {
             .from('perfiles_economia')
             .select('*')
             .eq('discord_id', victima.id)
+            .eq('server_id', serverId)
             .single();
 
         if (victimaError || !victimaData) {
-            return interaction.editReply('El usuario al que intentas robar no tiene una cuenta economica.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ El usuario al que intentas robar no tiene una cuenta económica.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         if (Number(victimaData.balance) < 1000) {
-            return interaction.editReply('Esta victima tiene proteccion por tener menos de 1000 monedas.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Esta víctima tiene protección por tener menos de 1000 monedas.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         if (victimaData.sido_robado_el) {
@@ -72,7 +98,10 @@ module.exports = {
                 const timeLeftMs = msIn2Hours - diffInMs;
                 const hoursLeft = Math.floor(timeLeftMs / (1000 * 60 * 60));
                 const minutesLeft = Math.floor((timeLeftMs % (1000 * 60 * 60)) / (1000 * 60));
-                return interaction.editReply(`Este usuario tiene proteccion temporal contra robos. Intenta en ${hoursLeft}h y ${minutesLeft}m.`);
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription(`❌ Este usuario tiene protección temporal contra robos. Intenta en **${hoursLeft}h y ${minutesLeft}m**.`);
+                return interaction.editReply({ embeds: [errEmbed] });
             }
         }
 
@@ -105,10 +134,15 @@ module.exports = {
             let nuevoSaldoAtacante = Number(atacanteData.balance) - multaFija;
             if (nuevoSaldoAtacante < 0) nuevoSaldoAtacante = 0;
 
-            await supabase
+            const { error: updateError } = await supabase
                 .from('perfiles_economia')
                 .update({ balance: nuevoSaldoAtacante, ultimo_robo: nowIso })
-                .eq('discord_id', atacanteId);
+                .eq('discord_id', atacanteId)
+                .eq('server_id', serverId);
+
+            if (!updateError) {
+                await sumarAlFisco(multaFija);
+            }
 
             const embedMaletin = new EmbedBuilder()
                 .setTitle('🚨 Robo Frustrado por Defensa')
@@ -135,24 +169,33 @@ module.exports = {
             const { error: updateAtacanteError } = await supabase
                 .from('perfiles_economia')
                 .update({ balance: nuevoSaldoAtacante, ultimo_robo: nowIso })
-                .eq('discord_id', atacanteId);
+                .eq('discord_id', atacanteId)
+                .eq('server_id', serverId);
 
             if (updateAtacanteError) {
-                return interaction.editReply('Ocurrio un error al intentar el robo.');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ Ocurrió un error al intentar el robo.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             const { error: updateVictimaError } = await supabase
                 .from('perfiles_economia')
                 .update({ balance: nuevoSaldoVictima, sido_robado_el: nowIso })
-                .eq('discord_id', victima.id);
+                .eq('discord_id', victima.id)
+                .eq('server_id', serverId);
 
             if (updateVictimaError) {
                 await supabase
                     .from('perfiles_economia')
                     .update({ balance: atacanteData.balance })
-                    .eq('discord_id', atacanteId);
+                    .eq('discord_id', atacanteId)
+                    .eq('server_id', serverId);
 
-                return interaction.editReply('Ocurrio un error al sustraer el dinero de la victima. El robo fue cancelado.');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ Ocurrió un error al sustraer el dinero de la víctima. El robo fue cancelado.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             const embedExito = new EmbedBuilder()
@@ -192,22 +235,28 @@ module.exports = {
             const { error: updateAtacanteError } = await supabase
                 .from('perfiles_economia')
                 .update({ balance: nuevoSaldoAtacante, ultimo_robo: nowIso })
-                .eq('discord_id', atacanteId);
+                .eq('discord_id', atacanteId)
+                .eq('server_id', serverId);
 
             if (updateAtacanteError) {
-                return interaction.editReply('Ocurrio un error al intentar el robo.');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ Ocurrió un error al intentar el robo.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             const { error: updateVictimaError } = await supabase
                 .from('perfiles_economia')
                 .update({ balance: nuevoSaldoVictima })
-                .eq('discord_id', victima.id);
+                .eq('discord_id', victima.id)
+                .eq('server_id', serverId);
 
             if (updateVictimaError) {
                 await supabase
                     .from('perfiles_economia')
                     .update({ balance: atacanteData.balance })
-                    .eq('discord_id', atacanteId);
+                    .eq('discord_id', atacanteId)
+                    .eq('server_id', serverId);
 
                 return interaction.editReply('Ocurrio un error al transferir la indemnizacion a la victima. El robo fue cancelado.');
             }

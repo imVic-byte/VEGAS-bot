@@ -27,11 +27,17 @@ module.exports = {
 
             if (error) {
                 console.error(error);
-                return interaction.editReply('❌ Hubo un error al cargar tus mascotas.');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ Hubo un error al cargar tus mascotas.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             if (!invMascotas || invMascotas.length === 0) {
-                return interaction.editReply('🐾 No posees ninguna mascota en tu inventario. ¡Visita la `/shop` para comprar algunas!');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('🐾 No posees ninguna mascota en tu inventario. ¡Visita la `/shop` para comprar algunas!');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             const options = [];
@@ -77,10 +83,13 @@ module.exports = {
 
         } catch (err) {
             console.error(err);
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Ocurrió un error inesperado al cargar tus mascotas.');
             if (interaction.deferred) {
-                await interaction.editReply('❌ Ocurrió un error inesperado al cargar tus mascotas.');
+                await interaction.editReply({ embeds: [errEmbed] });
             } else {
-                await interaction.reply({ content: '❌ Ocurrió un error inesperado al cargar tus mascotas.', ephemeral: true });
+                await interaction.reply({ embeds: [errEmbed], ephemeral: true });
             }
         }
     }

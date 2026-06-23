@@ -29,6 +29,14 @@ module.exports = {
                         .setMinValue(1))),
 
     async execute(interaction) {
+        const serverId = interaction.guildId;
+        if (!serverId) {
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Este comando solo se puede usar dentro de un servidor.');
+            return interaction.reply({ embeds: [errEmbed], ephemeral: true });
+        }
+
         await interaction.deferReply();
         const subcomando = interaction.options.getSubcommand();
         const userId = interaction.user.id;
@@ -42,10 +50,14 @@ module.exports = {
                 tienda_bovedas:boveda_nivel_id (capacidad_maxima)
             `)
             .eq('discord_id', userId)
+            .eq('server_id', serverId)
             .single();
 
         if (userError || !user) {
-            return interaction.editReply('❌ No tienes una cuenta económica. Usa `/daily` primero para abrir una.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ No tienes una cuenta económica. Usa `/daily` primero para abrir una.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         const balanceBilletera = Number(user.balance) || 0;
@@ -81,13 +93,19 @@ module.exports = {
             const cantidadADepositar = interaction.options.getInteger('cantidad');
 
             if (balanceBilletera < cantidadADepositar) {
-                return interaction.editReply(`❌ No tienes fondos suficientes en tu billetera. Solo tienes **${balanceBilletera}** monedas disponibles.`);
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription(`❌ No tienes fondos suficientes en tu billetera. Solo tienes **${balanceBilletera}** monedas disponibles.`);
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             const espacioDisponible = capacidadMaxima - balanceBoveda;
 
             if (cantidadADepositar > espacioDisponible) {
-                return interaction.editReply(`❌ No hay suficiente espacio en la Bóveda. Intentas guardar **${cantidadADepositar}** monedas, pero solo queda espacio para **${espacioDisponible}** monedas (Capacidad Máxima: ${capacidadMaxima}).`);
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription(`❌ No hay suficiente espacio en la Bóveda. Intentas guardar **${cantidadADepositar}** monedas, pero solo queda espacio para **${espacioDisponible}** monedas (Capacidad Máxima: ${capacidadMaxima}).`);
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             const nuevoBalanceBilletera = balanceBilletera - cantidadADepositar;
@@ -97,11 +115,15 @@ module.exports = {
             const { error: updateError } = await supabase
                 .from('perfiles_economia')
                 .update({ balance: nuevoBalanceBilletera, balance_boveda: nuevoBalanceBoveda })
-                .eq('discord_id', userId);
+                .eq('discord_id', userId)
+                .eq('server_id', serverId);
 
             if (updateError) {
                 console.error(updateError);
-                return interaction.editReply('❌ Ocurrió un error al procesar el depósito en la base de datos.');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ Ocurrió un error al procesar el depósito en la base de datos.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             const embedDepositar = new EmbedBuilder()
@@ -119,7 +141,10 @@ module.exports = {
             const cantidadARetirar = interaction.options.getInteger('cantidad');
 
             if (balanceBoveda < cantidadARetirar) {
-                return interaction.editReply(`❌ No tienes suficientes fondos guardados en la bóveda. Saldo actual protegido: **${balanceBoveda}** monedas.`);
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription(`❌ No tienes suficientes fondos guardados en la bóveda. Saldo actual protegido: **${balanceBoveda}** monedas.`);
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             const nuevoBalanceBilletera = balanceBilletera + cantidadARetirar;
@@ -129,11 +154,15 @@ module.exports = {
             const { error: updateError } = await supabase
                 .from('perfiles_economia')
                 .update({ balance: nuevoBalanceBilletera, balance_boveda: nuevoBalanceBoveda })
-                .eq('discord_id', userId);
+                .eq('discord_id', userId)
+                .eq('server_id', serverId);
 
             if (updateError) {
                 console.error(updateError);
-                return interaction.editReply('❌ Ocurrió un error al procesar el retiro en la base de datos.');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ Ocurrió un error al procesar el retiro en la base de datos.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             const embedRetirar = new EmbedBuilder()

@@ -27,11 +27,17 @@ module.exports = {
 
             if (error) {
                 console.error(error);
-                return interaction.editReply('❌ Hubo un error al cargar tus roles.');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ Hubo un error al cargar tus roles.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             if (!invRoles || invRoles.length === 0) {
-                return interaction.editReply('🎭 No posees ningún rol en tu inventario. ¡Visita la `/shop` para comprar algunos!');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('🎭 No posees ningún rol en tu inventario. ¡Visita la `/shop` para comprar algunos!');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             // Obtener el member de Discord para ver qué roles tiene equipados
@@ -45,7 +51,10 @@ module.exports = {
                 .slice(0, 25);
 
             if (validRoles.length === 0) {
-                 return interaction.editReply('❌ Ocurrió un problema con los roles registrados (falta ID de Discord).');
+                 const errEmbed = new EmbedBuilder()
+                     .setColor('Red')
+                     .setDescription('❌ Ocurrió un problema con los roles registrados (falta ID de Discord).');
+                 return interaction.editReply({ embeds: [errEmbed] });
             }
 
             validRoles.forEach(item => {
@@ -81,10 +90,13 @@ module.exports = {
 
         } catch (err) {
             console.error(err);
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Ocurrió un error inesperado al cargar tus roles.');
             if (interaction.deferred) {
-                await interaction.editReply('❌ Ocurrió un error inesperado al cargar tus roles.');
+                await interaction.editReply({ embeds: [errEmbed] });
             } else {
-                await interaction.reply({ content: '❌ Ocurrió un error inesperado al cargar tus roles.', ephemeral: true });
+                await interaction.reply({ embeds: [errEmbed], ephemeral: true });
             }
         }
     }

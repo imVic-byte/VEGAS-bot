@@ -19,12 +19,23 @@ module.exports = {
         const discordId = interaction.user.id;
         const apuesta = interaction.options.getInteger('apuesta');
 
+        const serverId = interaction.guildId;
+        if (!serverId) {
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Este comando solo se puede usar dentro de un servidor.');
+            return interaction.reply({ embeds: [errEmbed], ephemeral: true });
+        }
+
         await interaction.deferReply();
 
-        const userData = await getUserWithBuffs(discordId);
+        const userData = await getUserWithBuffs(discordId, serverId, interaction.guild);
 
         if (!userData || !userData.profile) {
-            return interaction.editReply('❌ No tienes una cuenta registrada. Usa `/daily` primero.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ No tienes una cuenta registrada. Usa `/daily` primero.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         const user = userData.profile;
@@ -38,11 +49,15 @@ module.exports = {
         const { error: deductError } = await supabase
             .from('perfiles_economia')
             .update({ balance: balanceDespuésDeApuesta })
-            .eq('discord_id', discordId);
+            .eq('discord_id', discordId)
+            .eq('server_id', serverId);
 
         if (deductError) {
             console.error('Error deduct crash bet:', deductError);
-            return interaction.editReply('❌ Hubo un error procesando tu apuesta.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Hubo un error procesando tu apuesta.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         // 2. Cálculos de Buffos y Crash Point
@@ -106,20 +121,30 @@ module.exports = {
 
             const finalBalance = balanceDespuésDeApuesta + retenido;
             if (retenido > 0) {
-                await supabase.from('perfiles_economia').update({ balance: finalBalance }).eq('discord_id', discordId);
+                await supabase.from('perfiles_economia').update({ balance: finalBalance }).eq('discord_id', discordId).eq('server_id', serverId);
             }
 
             const { procesarSeguro } = require('../utils/handleSeguro');
-            const resultadoSeguro = await procesarSeguro(discordId, apuesta);
+            const resultadoSeguro = await procesarSeguro(discordId, serverId, apuesta);
+
+            const finalRefund = resultadoSeguro.tituloDerrota === 'Derrota Asegurada' ? Math.floor(apuesta * 0.25) : 0;
+            const finalLoss = (apuesta - retenido) - finalRefund;
 
             if (resultadoSeguro.tituloDerrota === 'Derrota Asegurada') {
                 embed.setColor(0xED4245)
                      .setTitle(resultadoSeguro.tituloDerrota)
-                     .setDescription(`💥 **¡CRASH!** La nave explotó en **1.00x**\n\n${resultadoSeguro.descripcionDerrota}\nSaldo actual: ${(finalBalance + Math.floor(apuesta * 0.25)).toLocaleString()}`);
+                     .setDescription(`💥 **¡CRASH!** La nave explotó en **1.00x**\n\n${resultadoSeguro.descripcionDerrota}`);
             } else {
                 embed.setColor(0xED4245)
-                     .setDescription(`💥 **¡CRASH!** La nave explotó en **1.00x**\n\nPerdiste ${apuesta - retenido} monedas${retenido > 0 ? ` (Retuviste ${retenido} por tus buffos)` : ''}.\nSaldo actual: ${finalBalance.toLocaleString()}`);
+                     .setDescription(`💥 **¡CRASH!** La nave explotó en **1.00x**\n\nPerdiste ${apuesta - retenido} monedas${retenido > 0 ? ` (Retuviste ${retenido} por tus buffos)` : ''}.`);
             }
+
+            embed.addFields(
+                { name: '👤 Jugador', value: userData.displayName, inline: true },
+                { name: '💵 Apuesta', value: `${apuesta} monedas`, inline: true },
+                { name: '📈 Resultado Financiero', value: `-${finalLoss} monedas`, inline: true },
+                { name: '💰 Saldo Actual', value: `${(finalBalance + finalRefund).toLocaleString()} monedas`, inline: false }
+            );
 
             return interaction.editReply({ embeds: [embed], components: [disabledRow] });
         }
@@ -177,10 +202,20 @@ module.exports = {
             const gananciaReal = applyBuffs(gananciaBruta, userData.buffs, 'coins');
             const nuevoBalance = balanceDespuésDeApuesta + gananciaReal;
 
-            await supabase.from('perfiles_economia').update({ balance: nuevoBalance }).eq('discord_id', discordId);
+            await supabase.from('perfiles_economia').update({ balance: nuevoBalance }).eq('discord_id', discordId).eq('server_id', serverId);
+
+            const netReward = gananciaReal - apuesta;
+            const netRewardStr = netReward >= 0 ? `+${netReward}` : `${netReward}`;
 
             embed.setColor(0x57F287)
-                 .setDescription(`✅ **¡Te retiraste a tiempo!**\nMultiplicador final: **${cashedOutMultiplier.toFixed(2)}x**\n\nGanaste **${gananciaReal} monedas**${coinsBuff > 0 ? ' (buffos aplicados)' : ''}.\nSaldo actual: ${nuevoBalance.toLocaleString()}`);
+                 .setDescription(`✅ **¡Te retiraste a tiempo!**\nMultiplicador final: **${cashedOutMultiplier.toFixed(2)}x**\n\nGanaste **${gananciaReal} monedas**${coinsBuff > 0 ? ' (buffos aplicados)' : ''}.`);
+
+            embed.addFields(
+                { name: '👤 Jugador', value: userData.displayName, inline: true },
+                { name: '💵 Apuesta', value: `${apuesta} monedas`, inline: true },
+                { name: '📈 Resultado Financiero', value: `${netRewardStr} monedas`, inline: true },
+                { name: '💰 Saldo Actual', value: `${nuevoBalance.toLocaleString()} monedas`, inline: false }
+            );
 
             await interaction.editReply({ embeds: [embed], components: [endRow] }).catch(() => {});
         } else if (busted) {
@@ -193,20 +228,31 @@ module.exports = {
 
             const nuevoBalance = balanceDespuésDeApuesta + retenido;
             if (retenido > 0) {
-                await supabase.from('perfiles_economia').update({ balance: nuevoBalance }).eq('discord_id', discordId);
+                await supabase.from('perfiles_economia').update({ balance: nuevoBalance }).eq('discord_id', discordId).eq('server_id', serverId);
             }
 
             const { procesarSeguro } = require('../utils/handleSeguro');
-            const resultadoSeguro = await procesarSeguro(discordId, apuesta);
+            const resultadoSeguro = await procesarSeguro(discordId, serverId, apuesta);
+
+            const finalRefund = resultadoSeguro.tituloDerrota === 'Derrota Asegurada' ? Math.floor(apuesta * 0.25) : 0;
+            const finalLoss = (apuesta - retenido) - finalRefund;
+            const totalBalance = nuevoBalance + finalRefund;
 
             if (resultadoSeguro.tituloDerrota === 'Derrota Asegurada') {
                 embed.setColor(0xED4245)
                      .setTitle(resultadoSeguro.tituloDerrota)
-                     .setDescription(`💥 **¡CRASH!** La nave explotó en **${crashPoint.toFixed(2)}x**\n\n${resultadoSeguro.descripcionDerrota}\nSaldo actual: ${(nuevoBalance + Math.floor(apuesta * 0.25)).toLocaleString()}`);
+                     .setDescription(`💥 **¡CRASH!** La nave explotó en **${crashPoint.toFixed(2)}x**\n\n${resultadoSeguro.descripcionDerrota}`);
             } else {
                 embed.setColor(0xED4245)
-                     .setDescription(`💥 **¡CRASH!** La nave explotó en **${crashPoint.toFixed(2)}x**\n\nPerdiste **${apuesta - retenido} monedas**${retenido > 0 ? ` (Retuviste ${retenido} gracias a tu mascota)` : ''}.\nSaldo actual: ${nuevoBalance.toLocaleString()}`);
+                     .setDescription(`💥 **¡CRASH!** La nave explotó en **${crashPoint.toFixed(2)}x**\n\nPerdiste **${apuesta - retenido} monedas**${retenido > 0 ? ` (Retuviste ${retenido} gracias a tu mascota)` : ''}.`);
             }
+
+            embed.addFields(
+                { name: '👤 Jugador', value: userData.displayName, inline: true },
+                { name: '💵 Apuesta', value: `${apuesta} monedas`, inline: true },
+                { name: '📈 Resultado Financiero', value: `-${finalLoss} monedas`, inline: true },
+                { name: '💰 Saldo Actual', value: `${totalBalance.toLocaleString()} monedas`, inline: false }
+            );
 
             await interaction.editReply({ embeds: [embed], components: [endRow] }).catch(() => {});
         }

@@ -35,6 +35,14 @@ module.exports = {
                         .setRequired(true))),
 
     async execute(interaction) {
+        const serverId = interaction.guildId;
+        if (!serverId) {
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Este comando solo se puede usar dentro de un servidor.');
+            return interaction.reply({ embeds: [errEmbed], ephemeral: true });
+        }
+
         await interaction.deferReply();
         const subcomando = interaction.options.getSubcommand();
         const retadorId = interaction.user.id;
@@ -44,34 +52,59 @@ module.exports = {
             const apuesta = interaction.options.getInteger('apuesta');
 
             if (retadorId === oponente.id) {
-                return interaction.editReply('❌ No puedes retarte a ti mismo.');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ No puedes retarte a ti mismo.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
-            // Validar fondos del retador
+            // Validar existencia y fondos del retador
             const { data: retadorData, error: retError } = await supabase
                 .from('perfiles_economia')
                 .select('balance')
                 .eq('discord_id', retadorId)
-                .single();
+                .eq('server_id', serverId)
+                .maybeSingle();
 
-            if (retError || !retadorData || Number(retadorData.balance) < apuesta) {
-                return interaction.editReply(`❌ Fondos insuficientes. Necesitas al menos **${apuesta}** monedas para este duelo.`);
+            if (!retadorData) {
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ No tienes un perfil económico registrado en este servidor. Usa `/daily` para crearlo.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
-            // Validar fondos del oponente
+            if (Number(retadorData.balance) < apuesta) {
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription(`❌ Fondos insuficientes. Tienes **${retadorData.balance}** monedas, pero necesitas **${apuesta}** para este duelo.`);
+                return interaction.editReply({ embeds: [errEmbed] });
+            }
+
+            // Validar existencia y fondos del oponente
             const { data: oponenteData, error: opError } = await supabase
                 .from('perfiles_economia')
                 .select('balance')
                 .eq('discord_id', oponente.id)
-                .single();
+                .eq('server_id', serverId)
+                .maybeSingle();
 
-            if (opError || !oponenteData || Number(oponenteData.balance) < apuesta) {
-                return interaction.editReply(`❌ <@${oponente.id}> no tiene fondos suficientes para aceptar esta apuesta.`);
+            if (!oponenteData) {
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription(`❌ <@${oponente.id}> no tiene un perfil económico registrado en este servidor.`);
+                return interaction.editReply({ embeds: [errEmbed] });
+            }
+
+            if (Number(oponenteData.balance) < apuesta) {
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription(`❌ <@${oponente.id}> no tiene suficientes monedas para aceptar esta apuesta.`);
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             // Descontar fondos del retador (congelar)
             const nuevoBalanceRetador = Number(retadorData.balance) - apuesta;
-            await supabase.from('perfiles_economia').update({ balance: nuevoBalanceRetador }).eq('discord_id', retadorId);
+            await supabase.from('perfiles_economia').update({ balance: nuevoBalanceRetador }).eq('discord_id', retadorId).eq('server_id', serverId);
 
             // Generar UUID
             const dueloId = crypto.randomUUID();
@@ -82,7 +115,8 @@ module.exports = {
                 retador_id: retadorId,
                 oponente_id: oponente.id,
                 apuesta: apuesta,
-                estado: 'esperando'
+                estado: 'esperando',
+                server_id: serverId
             }]);
 
             const embedEsperando = new EmbedBuilder()
@@ -114,8 +148,8 @@ module.exports = {
                 if (accion === 'rechazar') {
                     await i.deferUpdate();
                     // Reembolsar retador
-                    const { data: retData } = await supabase.from('perfiles_economia').select('balance').eq('discord_id', retadorId).single();
-                    await supabase.from('perfiles_economia').update({ balance: Number(retData.balance) + apuesta }).eq('discord_id', retadorId);
+                    const { data: retData } = await supabase.from('perfiles_economia').select('balance').eq('discord_id', retadorId).eq('server_id', serverId).single();
+                    await supabase.from('perfiles_economia').update({ balance: Number(retData.balance) + apuesta }).eq('discord_id', retadorId).eq('server_id', serverId);
                     // Actualizar fila
                     await supabase.from('duelos_versus').update({ estado: 'finalizado' }).eq('id', dueloId);
 
@@ -125,19 +159,22 @@ module.exports = {
                 } else if (accion === 'aceptar') {
                     await i.deferUpdate();
                     // Verificar balance oponente de nuevo
-                    const { data: opData } = await supabase.from('perfiles_economia').select('balance').eq('discord_id', oponente.id).single();
+                    const { data: opData } = await supabase.from('perfiles_economia').select('balance').eq('discord_id', oponente.id).eq('server_id', serverId).single();
                     if (!opData || Number(opData.balance) < apuesta) {
                         // Reembolsar y cancelar
-                        const { data: retData } = await supabase.from('perfiles_economia').select('balance').eq('discord_id', retadorId).single();
-                        await supabase.from('perfiles_economia').update({ balance: Number(retData.balance) + apuesta }).eq('discord_id', retadorId);
+                        const { data: retData } = await supabase.from('perfiles_economia').select('balance').eq('discord_id', retadorId).eq('server_id', serverId).single();
+                        await supabase.from('perfiles_economia').update({ balance: Number(retData.balance) + apuesta }).eq('discord_id', retadorId).eq('server_id', serverId);
                         await supabase.from('duelos_versus').update({ estado: 'finalizado' }).eq('id', dueloId);
                         
-                        return interaction.editReply({ content: 'El oponente ya no tiene fondos suficientes. Duelo cancelado y fondos devueltos.', embeds: [], components: [] });
+                        const errEmbed = new EmbedBuilder()
+                            .setColor('Red')
+                            .setDescription('❌ El oponente ya no tiene fondos suficientes. Duelo cancelado y fondos devueltos.');
+                        return interaction.editReply({ content: '', embeds: [errEmbed], components: [] });
                     }
 
                     // Descontar oponente
                     const nuevoBalanceOp = Number(opData.balance) - apuesta;
-                    await supabase.from('perfiles_economia').update({ balance: nuevoBalanceOp }).eq('discord_id', oponente.id);
+                    await supabase.from('perfiles_economia').update({ balance: nuevoBalanceOp }).eq('discord_id', oponente.id).eq('server_id', serverId);
 
                     // Actualizar duelo
                     await supabase.from('duelos_versus').update({ estado: 'en_progreso' }).eq('id', dueloId);
@@ -167,9 +204,9 @@ module.exports = {
             collector.on('end', async (collected, reason) => {
                 if (reason === 'time') {
                     // Reembolsar retador
-                    const { data: retData } = await supabase.from('perfiles_economia').select('balance').eq('discord_id', retadorId).single();
+                    const { data: retData } = await supabase.from('perfiles_economia').select('balance').eq('discord_id', retadorId).eq('server_id', serverId).single();
                     if (retData) {
-                        await supabase.from('perfiles_economia').update({ balance: Number(retData.balance) + apuesta }).eq('discord_id', retadorId);
+                        await supabase.from('perfiles_economia').update({ balance: Number(retData.balance) + apuesta }).eq('discord_id', retadorId).eq('server_id', serverId);
                     }
                     await supabase.from('duelos_versus').update({ estado: 'finalizado' }).eq('id', dueloId);
 
@@ -187,26 +224,39 @@ module.exports = {
             const tienePermisos = memberRoles.has(ROL_STAFF_ID);
 
             if (!tienePermisos) {
-                return interaction.editReply('❌ No tienes permiso para usar este comando. Requiere el rol Tier S.');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ No tienes permiso para usar este comando. Requiere el rol Tier S.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             const { data: duelo, error } = await supabase
                 .from('duelos_versus')
                 .select('*')
                 .eq('id', idDuelo)
+                .eq('server_id', serverId)
                 .single();
 
             if (error || !duelo) {
-                return interaction.editReply('❌ Duelo no encontrado. Verifica el UUID.');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ Duelo no encontrado. Verifica el UUID.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             if (duelo.estado !== 'conflicto') {
-                return interaction.editReply(`❌ Este duelo no se encuentra en estado de conflicto. Estado actual: ${duelo.estado}`);
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription(`❌ Este duelo no se encuentra en estado de conflicto. Estado actual: ${duelo.estado}`);
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             // Validar que el staff no sea parte del duelo
             if (retadorId === duelo.retador_id || retadorId === duelo.oponente_id) {
-                return interaction.editReply('❌ No puedes dictaminar el resultado de un duelo en el que participaste, incluso si eres Staff.');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ No puedes dictaminar el resultado de un duelo en el que participaste, incluso si eres Staff.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             // Distribuir fondos
@@ -217,14 +267,18 @@ module.exports = {
                 .from('perfiles_economia')
                 .select('balance')
                 .eq('discord_id', ganador.id)
+                .eq('server_id', serverId)
                 .single();
 
             if (!userData) {
-                return interaction.editReply('❌ El usuario ganador no tiene una cuenta de economía registrada.');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ El usuario ganador no tiene una cuenta de economía registrada.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             const nuevoBalance = Number(userData.balance) + premioNeto;
-            await supabase.from('perfiles_economia').update({ balance: nuevoBalance }).eq('discord_id', ganador.id);
+            await supabase.from('perfiles_economia').update({ balance: nuevoBalance }).eq('discord_id', ganador.id).eq('server_id', serverId);
             await supabase.from('duelos_versus').update({ estado: 'finalizado' }).eq('id', idDuelo);
 
             const embedResolucion = new EmbedBuilder()

@@ -26,21 +26,36 @@ module.exports = {
         ),
         
     async execute(interaction) {
+        const serverId = interaction.guildId;
+        if (!serverId) {
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Este comando solo se puede usar dentro de un servidor.');
+            return interaction.reply({ embeds: [errEmbed], ephemeral: true });
+        }
+
         await interaction.deferReply();
 
-        const estadoMora = await verificarEstadoMorosidad(interaction.user.id);
+        const estadoMora = await verificarEstadoMorosidad(interaction.user.id, serverId);
         if (estadoMora.bloqueado) {
-            return interaction.editReply(`🚫 **Acceso Denegado**\nNo puedes apostar en el casino porque el banco te ha embargado por morosidad.\nTienes una deuda vencida de **${estadoMora.deuda}** monedas. Usa \`/prestamo pagar\` para regularizar tu situación.`);
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setTitle('🚫 Acceso Denegado')
+                .setDescription(`No puedes apostar en el casino porque el banco te ha embargado por morosidad.\nTienes una deuda vencida de **${estadoMora.deuda}** monedas. Usa \`/prestamo pagar\` para regularizar tu situación.`);
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         const eleccion = interaction.options.getString('cara_o_sello');
         const apuesta = interaction.options.getInteger('apuesta');
         const discordId = interaction.user.id;
 
-        const userData = await getUserWithBuffs(discordId);
+        const userData = await getUserWithBuffs(discordId, serverId, interaction.guild);
 
         if (!userData || !userData.profile) {
-            return interaction.editReply('No tienes una cuenta registrada. Usa /daily primero.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ No tienes una cuenta registrada. Usa `/daily` primero.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         const user = userData.profile;
@@ -118,7 +133,8 @@ module.exports = {
         const { error: updateError } = await supabase
             .from('perfiles_economia')
             .update({ balance: nuevoBalance })
-            .eq('discord_id', discordId);
+            .eq('discord_id', discordId)
+            .eq('server_id', serverId);
 
         if (updateError) {
             return interaction.editReply({ 
@@ -129,19 +145,28 @@ module.exports = {
 
         if (!ganoNormal && !cayoDeCanto) {
             const { procesarSeguro } = require('../utils/handleSeguro');
-            const resultadoSeguro = await procesarSeguro(discordId, apuesta);
+            const resultadoSeguro = await procesarSeguro(discordId, serverId, apuesta);
             
             if (resultadoSeguro.tituloDerrota === 'Derrota Asegurada') {
                 tituloResultado = resultadoSeguro.tituloDerrota;
                 nuevoBalance += Math.floor(apuesta * 0.25);
-                gananciaTexto = `${resultadoSeguro.descripcionDerrota}\nSaldo actual: ${nuevoBalance}`;
+                gananciaTexto = `${resultadoSeguro.descripcionDerrota}`;
             }
         }
+
+        const netReward = nuevoBalance - Number(user.balance);
+        const netRewardStr = netReward >= 0 ? `+${netReward}` : `${netReward}`;
 
         const embedFinal = new EmbedBuilder()
             .setColor(colorEmbed)
             .setTitle(tituloResultado)
-            .setDescription(gananciaTexto);
+            .setDescription(gananciaTexto)
+            .addFields(
+                { name: '👤 Jugador', value: userData.displayName, inline: true },
+                { name: '💵 Apuesta', value: `${apuesta} monedas`, inline: true },
+                { name: '📈 Resultado Financiero', value: `${netRewardStr} monedas`, inline: true },
+                { name: '💰 Saldo Actual', value: `${nuevoBalance.toLocaleString()} monedas`, inline: false }
+            );
 
         if (resultado === 'cara') {
             embedFinal.setImage('https://rnhdmonauucuxpovqxun.supabase.co/storage/v1/object/public/vegas-media/Cara.png');

@@ -1,5 +1,6 @@
 const supabase = require('../supabase');
 const { getMascotaById } = require('./handleMascotas');
+const { sumarAlFisco, obtenerTasaImpuesto } = require('./handleFisco');
 const { getRoleById } = require('./handleRoles');
 const { getTitleById } = require('./handleTitulos');
 
@@ -14,10 +15,19 @@ async function procesarCompra(interaction, itemType, itemId) {
 
     try {
         // Buscar usuario
+        const serverId = interaction.guildId;
+        if (!serverId) {
+            return interaction.reply({
+                content: '❌ Las compras solo se pueden realizar dentro de un servidor.',
+                ephemeral: true
+            });
+        }
+
         const { data: usuario, error: userError } = await supabase
             .from('perfiles_economia')
             .select('*')
             .eq('discord_id', discordId)
+            .eq('server_id', serverId)
             .single();
 
         if (userError || !usuario) {
@@ -44,20 +54,26 @@ async function procesarCompra(interaction, itemType, itemId) {
                 return interaction.reply({ content: `❌ Progresión inválida. Para adquirir esta mejora debes tener activo el Nivel de Bóveda previo: **Nivel ${bovedaData.nivel_requerido}**.`, ephemeral: true });
             }
 
-            const impuesto = Math.floor(bovedaData.precio * 0.10);
+            const tasa = await obtenerTasaImpuesto(0.10);
+            const impuesto = Math.floor(bovedaData.precio * tasa);
             const precioTotal = bovedaData.precio + impuesto;
 
             if (usuario.balance < precioTotal) {
-                return interaction.reply({ content: `❌ Fondos insuficientes. El precio total (incluyendo 10% de IVA) es de **${precioTotal}** monedas.`, ephemeral: true });
+                return interaction.reply({ content: `❌ Fondos insuficientes. El precio total (incluyendo ${Math.round(tasa * 100)}% de IVA) es de **${precioTotal}** monedas.`, ephemeral: true });
             }
 
             const nuevoBalance = usuario.balance - precioTotal;
 
             // Actualizar perfiles_economia
-            await supabase
+            const { error: updateBovedaError } = await supabase
                 .from('perfiles_economia')
                 .update({ balance: nuevoBalance, boveda_nivel_id: bovedaData.id })
-                .eq('discord_id', discordId);
+                .eq('discord_id', discordId)
+                .eq('server_id', serverId);
+
+            if (!updateBovedaError) {
+                await sumarAlFisco(impuesto);
+            }
 
             // Insertar inventario_bovedas
             await supabase
@@ -72,7 +88,7 @@ async function procesarCompra(interaction, itemType, itemId) {
                 .addFields(
                     { name: 'Mejora Activada', value: bovedaData.nombre, inline: false },
                     { name: 'Precio Base', value: `${bovedaData.precio} monedas`, inline: true },
-                    { name: 'IVA (10%)', value: `${impuesto} monedas`, inline: true },
+                    { name: 'IVA (' + Math.round(tasa * 100) + '%)', value: `${impuesto} monedas`, inline: true },
                     { name: 'Total Pagado', value: `${precioTotal} monedas`, inline: true },
                     { name: 'Nueva Capacidad Máxima', value: `${bovedaData.capacidad_maxima} monedas`, inline: false }
                 );
@@ -152,7 +168,8 @@ async function procesarCompra(interaction, itemType, itemId) {
         }
 
         // Verificar saldo e impuestos
-        const impuesto = Math.floor(item.price * 0.10);
+        const tasa = await obtenerTasaImpuesto(0.10);
+        const impuesto = Math.floor(item.price * tasa);
         const precioTotal = item.price + impuesto;
 
         if (usuario.balance < precioTotal) {
@@ -160,7 +177,7 @@ async function procesarCompra(interaction, itemType, itemId) {
                 content:
                     `❌ No tienes suficientes monedas.\n\n` +
                     `💰 Saldo: ${usuario.balance}\n` +
-                    `🛒 Precio + IVA (10%): ${precioTotal}`,
+                    `🛒 Precio + IVA (${Math.round(tasa * 100)}%): ${precioTotal}`,
                 ephemeral: true
             });
         }
@@ -170,9 +187,12 @@ async function procesarCompra(interaction, itemType, itemId) {
         const { error: balanceError } = await supabase
             .from('perfiles_economia')
             .update({ balance: nuevoBalance })
-            .eq('discord_id', discordId);
+            .eq('discord_id', discordId)
+            .eq('server_id', serverId);
 
         if (balanceError) throw balanceError;
+        
+        await sumarAlFisco(impuesto);
 
         // Agregar al inventario correspondiente
         let inventoryData = { discord_id: discordId };
@@ -217,7 +237,7 @@ async function procesarCompra(interaction, itemType, itemId) {
                 `✅ Compra realizada con éxito\n\n` +
                 `🛒 Artículo: **${itemName}** (${itemType})\n` +
                 `💰 Precio Base: **${item.price}**\n` +
-                `🏛️ Impuesto IVA (10%): **${impuesto}**\n` +
+                `🏛️ Impuesto IVA (${Math.round(tasa * 100)}%): **${impuesto}**\n` +
                 `🏦 Nuevo saldo: **${nuevoBalance}**`,
             ephemeral: true
         });

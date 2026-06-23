@@ -27,11 +27,17 @@ module.exports = {
 
             if (error) {
                 console.error(error);
-                return interaction.editReply('❌ Hubo un error al cargar tus títulos.');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ Hubo un error al cargar tus títulos.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             if (!invTitulos || invTitulos.length === 0) {
-                return interaction.editReply('🏷️ No posees ningún título en tu inventario. ¡Visita la `/shop` para comprar algunos!');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('🏷️ No posees ningún título en tu inventario. ¡Visita la `/shop` para comprar algunos!');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             const options = [];
@@ -72,10 +78,13 @@ module.exports = {
 
         } catch (err) {
             console.error(err);
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Ocurrió un error inesperado al cargar tus títulos.');
             if (interaction.deferred) {
-                await interaction.editReply('❌ Ocurrió un error inesperado al cargar tus títulos.');
+                await interaction.editReply({ embeds: [errEmbed] });
             } else {
-                await interaction.reply({ content: '❌ Ocurrió un error inesperado al cargar tus títulos.', ephemeral: true });
+                await interaction.reply({ embeds: [errEmbed], ephemeral: true });
             }
         }
     }

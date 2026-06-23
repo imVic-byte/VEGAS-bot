@@ -8,6 +8,7 @@ const {
 } = require('discord.js');
 const supabase = require('../supabase');
 const { noMoney, yourself, together } = require('../utils/responses');
+const { sumarAlFisco, obtenerTasaImpuesto } = require('../utils/handleFisco');
 
 const cooldowns = new Map();
 
@@ -24,6 +25,14 @@ module.exports = {
         ),
 
     async execute(interaction) {
+        const serverId = interaction.guildId;
+        if (!serverId) {
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Este comando solo se puede usar dentro de un servidor.');
+            return interaction.reply({ embeds: [errEmbed], ephemeral: true });
+        }
+
         const tiempoCooldown = 120000;
 
         if (cooldowns.has(interaction.user.id)) {
@@ -31,8 +40,11 @@ module.exports = {
 
             if (Date.now() < tiempoExpiracion) {
                 const tiempoRestante = (tiempoExpiracion - Date.now()) / 1000;
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription(`❌ Debes esperar **${tiempoRestante.toFixed(1)}** segundos antes de volver a pedir monedas.`);
                 return interaction.reply({
-                    content: `Debes esperar ${tiempoRestante.toFixed(1)} segundos antes de volver a pedir monedas.`,
+                    embeds: [errEmbed],
                     ephemeral: true
                 });
             }
@@ -92,10 +104,14 @@ module.exports = {
                     .from('perfiles_economia')
                     .select('balance')
                     .eq('discord_id', i.user.id)
+                    .eq('server_id', serverId)
                     .single();
 
                 if (donorError || !donor) {
-                    return i.reply({ content: 'No tienes una cuenta registrada o ha ocurrido un error.', ephemeral: true });
+                    const errEmbed = new EmbedBuilder()
+                        .setColor('Red')
+                        .setDescription('❌ No tienes una cuenta registrada o ha ocurrido un error en este servidor.');
+                    return i.reply({ embeds: [errEmbed], ephemeral: true });
                 }
 
                 if (Number(donor.balance) < cantidad) {
@@ -106,37 +122,50 @@ module.exports = {
                     .from('perfiles_economia')
                     .select('balance')
                     .eq('discord_id', interaction.user.id)
+                    .eq('server_id', serverId)
                     .single();
 
                 if (beggarError || !beggar) {
-                    return i.reply({ content: 'El usuario que pide monedas no tiene una cuenta válida.', ephemeral: true });
+                    const errEmbed = new EmbedBuilder()
+                        .setColor('Red')
+                        .setDescription('❌ El usuario que pide monedas no tiene una cuenta válida en este servidor.');
+                    return i.reply({ embeds: [errEmbed], ephemeral: true });
                 }
 
-                const impuesto = Math.floor(cantidad * 0.12);
+                const tasa = await obtenerTasaImpuesto(0.12);
+                const impuesto = Math.floor(cantidad * tasa);
                 const neto = cantidad - impuesto;
 
                 const { error: deductError } = await supabase
                     .from('perfiles_economia')
                     .update({ balance: Number(donor.balance) - cantidad })
-                    .eq('discord_id', i.user.id);
+                    .eq('discord_id', i.user.id)
+                    .eq('server_id', serverId);
 
                 if (deductError) {
-                    return i.reply({ content: 'Hubo un error al procesar la donación.', ephemeral: true });
+                    const errEmbed = new EmbedBuilder()
+                        .setColor('Red')
+                        .setDescription('❌ Hubo un error al procesar la donación.');
+                    return i.reply({ embeds: [errEmbed], ephemeral: true });
                 }
 
                 const { error: addError } = await supabase
                     .from('perfiles_economia')
                     .update({ balance: Number(beggar.balance) + neto })
-                    .eq('discord_id', interaction.user.id);
+                    .eq('discord_id', interaction.user.id)
+                    .eq('server_id', serverId);
 
                 if (addError) {
                     console.error('Error adding balance to beggar:', addError);
+                } else {
+                    await sumarAlFisco(impuesto);
                 }
 
+                const porcentaje = (tasa * 100).toFixed(0);
                 const embedDonacion = new EmbedBuilder()
                     .setColor(0x57F287)
                     .setDescription(`💖 <@${i.user.id}> se compadeció y donó **${cantidad}** monedas a <@${interaction.user.id}>.\n\n` + 
-                    `🏛️ El Fisco retuvo **${impuesto}** monedas (12% IVA).\n` +
+                    `🏛️ El Fisco retuvo **${impuesto}** monedas (${porcentaje}% IVA).\n` +
                     `📦 <@${interaction.user.id}> recibió un neto de **${neto}** monedas.`);
 
                 await i.update({

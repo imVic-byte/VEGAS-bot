@@ -34,12 +34,24 @@ module.exports = {
         ),
 
     async execute(interaction) {
+        const serverId = interaction.guildId;
+        if (!serverId) {
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Este comando solo se puede usar dentro de un servidor.');
+            return interaction.reply({ embeds: [errEmbed], ephemeral: true });
+        }
+
         // Respuesta efímera para que cada jugador apueste en privado y no llene el chat
         await interaction.deferReply({ ephemeral: true });
 
-        const estadoMora = await verificarEstadoMorosidad(interaction.user.id);
+        const estadoMora = await verificarEstadoMorosidad(interaction.user.id, serverId);
         if (estadoMora.bloqueado) {
-            return interaction.editReply(`🚫 **Acceso Denegado**\nNo puedes apostar en el casino porque el banco te ha embargado por morosidad.\nTienes una deuda vencida de **${estadoMora.deuda}** monedas. Usa \`/prestamo pagar\` para regularizar tu situación.`);
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setTitle('🚫 Acceso Denegado')
+                .setDescription(`No puedes apostar en el casino porque el banco te ha embargado por morosidad.\nTienes una deuda vencida de **${estadoMora.deuda}** monedas. Usa \`/prestamo pagar\` para regularizar tu situación.`);
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         const discordId = interaction.user.id;
@@ -49,22 +61,34 @@ module.exports = {
 
         // Validaciones de valor
         if (tipo === 'color' && !['rojo', 'negro'].includes(valor)) {
-            return interaction.editReply('❌ Para apostar a color, escribe "rojo" o "negro".');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Para apostar a color, escribe "rojo" o "negro".');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
         if (tipo === 'paridad' && !['par', 'impar'].includes(valor)) {
-            return interaction.editReply('❌ Para apostar a paridad, escribe "par" o "impar".');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Para apostar a paridad, escribe "par" o "impar".');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
         if (tipo === 'numero') {
             const num = parseInt(valor);
             if (isNaN(num) || num < 0 || num > 36) {
-                return interaction.editReply('❌ El número debe estar entre 0 y 36.');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ El número debe estar entre 0 y 36.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
             valor = num.toString();
         }
 
-        const userData = await getUserWithBuffs(discordId);
+        const userData = await getUserWithBuffs(discordId, serverId, interaction.guild);
         if (!userData || !userData.profile) {
-            return interaction.editReply('❌ No tienes una cuenta registrada. Usa `/daily` primero.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ No tienes una cuenta registrada. Usa `/daily` primero.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         const user = userData.profile;
@@ -76,11 +100,15 @@ module.exports = {
         const { error: deductError } = await supabase
             .from('perfiles_economia')
             .update({ balance: Number(user.balance) - apuesta })
-            .eq('discord_id', discordId);
+            .eq('discord_id', discordId)
+            .eq('server_id', serverId);
 
         if (deductError) {
             console.error('Error deduct ruleta:', deductError);
-            return interaction.editReply('❌ Hubo un error procesando tu apuesta.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Hubo un error procesando tu apuesta.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         const channelId = interaction.channelId;
@@ -88,7 +116,7 @@ module.exports = {
 
         const playerInfo = {
             discordId: discordId,
-            username: interaction.user.username,
+            username: userData.displayName,
             apuesta: apuesta,
             tipo: tipo,
             valor: valor,
@@ -99,11 +127,17 @@ module.exports = {
             // Unirse a mesa existente
             const mesa = mesasActivas.get(channelId);
             mesa.players.push(playerInfo);
-            return interaction.editReply(`✅ Tu apuesta de **${apuesta}** a **${valor}** ha entrado en la ruleta en curso.`);
+            const okEmbed = new EmbedBuilder()
+                .setColor('Green')
+                .setDescription(`✅ Tu apuesta de **${apuesta}** a **${valor}** ha entrado en la ruleta en curso.`);
+            return interaction.editReply({ embeds: [okEmbed] });
         } else {
             // Crear mesa nueva
             mesasActivas.set(channelId, { players: [playerInfo] });
-            await interaction.editReply(`✅ Has iniciado la ruleta apostando **${apuesta}** a **${valor}**.`);
+            const okEmbed = new EmbedBuilder()
+                .setColor('Green')
+                .setDescription(`✅ Has iniciado la ruleta apostando **${apuesta}** a **${valor}**.`);
+            await interaction.editReply({ embeds: [okEmbed] });
 
             const embedInicio = new EmbedBuilder()
                 .setColor(0xE74C3C)
@@ -147,6 +181,7 @@ module.exports = {
                     .from('perfiles_economia')
                     .select('balance')
                     .eq('discord_id', p.discordId)
+                    .eq('server_id', serverId)
                     .single();
                 
                 const currentBalance = currentProfile ? Number(currentProfile.balance) : 0;
@@ -161,9 +196,11 @@ module.exports = {
                     await supabase
                         .from('perfiles_economia')
                         .update({ balance: currentBalance + gananciaReal })
-                        .eq('discord_id', p.discordId);
+                        .eq('discord_id', p.discordId)
+                        .eq('server_id', serverId);
 
-                    ganadores.push(`**${p.username}** gana ${gananciaReal} (apostó a ${p.valor})`);
+                    const netWin = gananciaReal - p.apuesta;
+                    ganadores.push(`👤 **${p.username}** | Apuesta: **${p.apuesta}** | Resultado: **+${netWin}** monedas *(Total Recibido: ${gananciaReal})*`);
                 } else {
                     let retenido = 0;
                     if (p.coinsBuff > 0) {
@@ -176,16 +213,18 @@ module.exports = {
                         await supabase
                             .from('perfiles_economia')
                             .update({ balance: currentBalance + retenido })
-                            .eq('discord_id', p.discordId);
+                            .eq('discord_id', p.discordId)
+                            .eq('server_id', serverId);
                     }
 
                     const { procesarSeguro } = require('../utils/handleSeguro');
-                    const resultadoSeguro = await procesarSeguro(p.discordId, p.apuesta);
+                    const resultadoSeguro = await procesarSeguro(p.discordId, serverId, p.apuesta);
 
+                    const netLoss = p.apuesta - retenido - (resultadoSeguro.tituloDerrota === 'Derrota Asegurada' ? Math.floor(p.apuesta * 0.25) : 0);
                     if (resultadoSeguro.tituloDerrota === 'Derrota Asegurada') {
-                        perdedores.push(`**${p.username}** pierde ${p.apuesta - retenido} a ${p.valor}, pero el Seguro devolvio un 25%`);
+                        perdedores.push(`👤 **${p.username}** | Apuesta: **${p.apuesta}** | Resultado: **-${netLoss}** monedas *(Seguro activado)*`);
                     } else {
-                        perdedores.push(`**${p.username}** pierde ${p.apuesta - retenido}${retenido > 0 ? ` (+ retención)` : ''} (apostó a ${p.valor})`);
+                        perdedores.push(`👤 **${p.username}** | Apuesta: **${p.apuesta}** | Resultado: **-${netLoss}** monedas${retenido > 0 ? ' *(con retención)*' : ''}`);
                     }
                 }
             }

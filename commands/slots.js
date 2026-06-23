@@ -17,19 +17,34 @@ module.exports = {
         ),
 
     async execute(interaction) {
+        const serverId = interaction.guildId;
+        if (!serverId) {
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Este comando solo se puede usar dentro de un servidor.');
+            return interaction.reply({ embeds: [errEmbed], ephemeral: true });
+        }
+
         await interaction.deferReply();
 
-        const estadoMora = await verificarEstadoMorosidad(interaction.user.id);
+        const estadoMora = await verificarEstadoMorosidad(interaction.user.id, serverId);
         if (estadoMora.bloqueado) {
-            return interaction.editReply(`🚫 **Acceso Denegado**\nNo puedes apostar en el casino porque el banco te ha embargado por morosidad.\nTienes una deuda vencida de **${estadoMora.deuda}** monedas. Usa \`/prestamo pagar\` para regularizar tu situación.`);
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setTitle('🚫 Acceso Denegado')
+                .setDescription(`No puedes apostar en el casino porque el banco te ha embargado por morosidad.\nTienes una deuda vencida de **${estadoMora.deuda}** monedas. Usa \`/prestamo pagar\` para regularizar tu situación.`);
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         const discordId = interaction.user.id;
         const apuesta = interaction.options.getInteger('apuesta');
 
-        const userData = await getUserWithBuffs(discordId);
+        const userData = await getUserWithBuffs(discordId, serverId, interaction.guild);
         if (!userData || !userData.profile) {
-            return interaction.editReply('❌ No tienes una cuenta registrada. Usa `/daily` primero.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ No tienes una cuenta registrada. Usa `/daily` primero.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         const user = userData.profile;
@@ -42,11 +57,15 @@ module.exports = {
         const { error: deductError } = await supabase
             .from('perfiles_economia')
             .update({ balance: balanceDespuesApuesta })
-            .eq('discord_id', discordId);
+            .eq('discord_id', discordId)
+            .eq('server_id', serverId);
 
         if (deductError) {
             console.error('Error deduct slots:', deductError);
-            return interaction.editReply('❌ Hubo un error procesando tu apuesta.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Hubo un error procesando tu apuesta.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         // Embed Animación de Carga
@@ -136,12 +155,23 @@ module.exports = {
             await supabase
                 .from('perfiles_economia')
                 .update({ balance: nuevoBalance })
-                .eq('discord_id', discordId);
+                .eq('discord_id', discordId)
+                .eq('server_id', serverId);
 
             const coinsBuff = getTotalBuffValue(userData.buffs, 'coins');
             
+            const netWin = gananciaReal - apuesta;
+            const netWinStr = netWin >= 0 ? `+${netWin}` : `${netWin}`;
+
             resultEmbed.setColor(0x57F287)
-                .setDescription(`${gridText}\n\n✅ **¡GANASTE!** Encontraste ${linesWon} línea(s) ganadora(s).\nMultiplicador acumulado: **x${totalMultiplier.toFixed(2)}**\nPremio total: **${gananciaReal}** monedas${coinsBuff > 0 ? ' (buffos aplicados)' : ''}.\n\nTu saldo actual: ${nuevoBalance.toLocaleString()}`);
+                .setDescription(`${gridText}\n\n✅ **¡GANASTE!** Encontraste ${linesWon} línea(s) ganadora(s).\nMultiplicador acumulado: **x${totalMultiplier.toFixed(2)}**\nPremio total: **${gananciaReal}** monedas${coinsBuff > 0 ? ' (buffos aplicados)' : ''}.`);
+
+            resultEmbed.addFields(
+                { name: '👤 Jugador', value: userData.displayName, inline: true },
+                { name: '💵 Apuesta', value: `${apuesta} monedas`, inline: true },
+                { name: '📈 Resultado Financiero', value: `${netWinStr} monedas`, inline: true },
+                { name: '💰 Saldo Actual', value: `${nuevoBalance.toLocaleString()} monedas`, inline: false }
+            );
         } else {
             let retenido = 0;
             const coinsBuff = getTotalBuffValue(userData.buffs, 'coins');
@@ -156,15 +186,26 @@ module.exports = {
                 await supabase
                     .from('perfiles_economia')
                     .update({ balance: nuevoBalance })
-                    .eq('discord_id', discordId);
+                    .eq('discord_id', discordId)
+                    .eq('server_id', serverId);
             }
 
             const { procesarSeguro } = require('../utils/handleSeguro');
-            const { tituloDerrota, descripcionDerrota } = await procesarSeguro(discordId, apuesta);
+            const { tituloDerrota, descripcionDerrota } = await procesarSeguro(discordId, serverId, apuesta);
+
+            const finalRefund = tituloDerrota === 'Derrota Asegurada' ? Math.floor(apuesta * 0.25) : 0;
+            const totalBalance = nuevoBalance + finalRefund;
+            const finalLoss = (apuesta - retenido) - finalRefund;
 
             resultEmbed.setColor(0xED4245)
                 .setTitle(tituloDerrota)
-                .setDescription(`${gridText}\n\n${descripcionDerrota}`);
+                .setDescription(`${gridText}\n\n${descripcionDerrota}`)
+                .addFields(
+                    { name: '👤 Jugador', value: userData.displayName, inline: true },
+                    { name: '💵 Apuesta', value: `${apuesta} monedas`, inline: true },
+                    { name: '📈 Resultado Financiero', value: `-${finalLoss} monedas`, inline: true },
+                    { name: '💰 Saldo Actual', value: `${totalBalance.toLocaleString()} monedas`, inline: false }
+                );
         }
 
         await interaction.editReply({ embeds: [resultEmbed] });

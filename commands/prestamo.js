@@ -24,6 +24,14 @@ module.exports = {
                 .setDescription('Consulta el estado de tu préstamo actual')),
 
     async execute(interaction) {
+        const serverId = interaction.guildId;
+        if (!serverId) {
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Este comando solo se puede usar dentro de un servidor.');
+            return interaction.reply({ embeds: [errEmbed], ephemeral: true });
+        }
+
         await interaction.deferReply();
         const subcomando = interaction.options.getSubcommand();
         const userId = interaction.user.id;
@@ -33,15 +41,22 @@ module.exports = {
             .from('perfiles_economia')
             .select('*')
             .eq('discord_id', userId)
+            .eq('server_id', serverId)
             .single();
 
         if (userError || !user) {
-            return interaction.editReply('No tienes una cuenta económica en el sistema. Usa /daily primero.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ No tienes una cuenta económica en el sistema. Usa `/daily` primero.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         if (subcomando === 'pedir') {
             if (Number(user.deuda_prestamo) > 0) {
-                return interaction.editReply('Ya tienes una deuda activa. Debes pagarla en su totalidad antes de poder solicitar otro préstamo.');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ Ya tienes una deuda activa. Debes pagarla en su totalidad antes de poder solicitar otro préstamo.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             const { data: tarjeta } = await supabase
@@ -103,6 +118,7 @@ module.exports = {
                     .from('perfiles_economia')
                     .select('deuda_prestamo, balance')
                     .eq('discord_id', userId)
+                    .eq('server_id', serverId)
                     .single();
 
                 if (Number(userUpdate.deuda_prestamo) > 0) {
@@ -126,7 +142,8 @@ module.exports = {
                         deuda_prestamo: deudaFinal,
                         vencimiento_prestamo: vencimiento
                     })
-                    .eq('discord_id', userId);
+                    .eq('discord_id', userId)
+                    .eq('server_id', serverId);
 
                 if (updateError) {
                     console.error(updateError);
@@ -166,8 +183,11 @@ module.exports = {
                         disabledRow.addComponents(btn7500);
                     }
                     
+                    const timeoutEmbed = new EmbedBuilder()
+                        .setColor('Grey')
+                        .setDescription('⏱️ El tiempo para solicitar el préstamo ha expirado.');
                     interaction.editReply({
-                        content: '⏱️ El tiempo para solicitar el préstamo ha expirado.',
+                        embeds: [timeoutEmbed],
                         components: [disabledRow]
                     }).catch(console.error);
                 }
@@ -178,12 +198,18 @@ module.exports = {
             const deudaActual = Number(user.deuda_prestamo) || 0;
 
             if (deudaActual <= 0) {
-                return interaction.editReply('No tienes ninguna deuda activa que pagar.');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ No tienes ninguna deuda activa que pagar.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             const balanceActual = Number(user.balance);
             if (balanceActual < cantidadPagar) {
-                return interaction.editReply(`No tienes fondos suficientes en tu billetera. Intentas pagar **${cantidadPagar}** pero tu balance actual es de **${balanceActual}** monedas.`);
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription(`❌ No tienes fondos suficientes en tu billetera. Intentas pagar **${cantidadPagar}** pero tu balance actual es de **${balanceActual}** monedas.`);
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             // Ajustar si la cantidad a pagar supera la deuda pendiente
@@ -203,30 +229,47 @@ module.exports = {
                     deuda_prestamo: nuevaDeuda,
                     vencimiento_prestamo: nuevoVencimiento
                 })
-                .eq('discord_id', userId);
+                .eq('discord_id', userId)
+                .eq('server_id', serverId);
 
             if (updateError) {
                 console.error(updateError);
-                return interaction.editReply('Ocurrió un error al procesar tu pago.');
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('❌ Ocurrió un error al procesar tu pago.');
+                return interaction.editReply({ embeds: [errEmbed] });
             }
 
             if (nuevaDeuda === 0) {
-                return interaction.editReply(`✅ Has pagado **${cantidadPagar}** monedas de tu billetera y **has liquidado completamente tu deuda** con el banco.`);
+                const okEmbed = new EmbedBuilder()
+                    .setColor('Green')
+                    .setDescription(`✅ Has pagado **${cantidadPagar}** monedas de tu billetera y **has liquidado completamente tu deuda** con el banco.`);
+                return interaction.editReply({ embeds: [okEmbed] });
             } else {
-                return interaction.editReply(`💸 Se descontaron **${cantidadPagar}** monedas de tu billetera para el pago.\nEl saldo restante de tu deuda es de **${nuevaDeuda}** monedas.`);
+                const okEmbed = new EmbedBuilder()
+                    .setColor('Green')
+                    .setDescription(`💸 Se descontaron **${cantidadPagar}** monedas de tu billetera para el pago.\nEl saldo restante de tu deuda es de **${nuevaDeuda}** monedas.`);
+                return interaction.editReply({ embeds: [okEmbed] });
             }
 
         } else if (subcomando === 'consultar') {
             const deudaActual = Number(user.deuda_prestamo) || 0;
 
             if (deudaActual <= 0) {
-                return interaction.editReply('Tu cuenta está completamente limpia y libre de obligaciones con el banco.');
+                const okEmbed = new EmbedBuilder()
+                    .setColor('Green')
+                    .setDescription('✅ Tu cuenta está completamente limpia y libre de obligaciones con el banco.');
+                return interaction.editReply({ embeds: [okEmbed] });
             }
 
             const vencimientoDate = new Date(user.vencimiento_prestamo);
             const discordTimestamp = Math.floor(vencimientoDate.getTime() / 1000);
 
-            return interaction.editReply(`📊 **Estado Crediticio**\nTienes una deuda activa por un monto total de **${deudaActual}** monedas.\nEl plazo para liquidar la deuda vence el: <t:${discordTimestamp}:F> (<t:${discordTimestamp}:R>).`);
+            const statusEmbed = new EmbedBuilder()
+                .setTitle('📊 Estado Crediticio')
+                .setColor('Gold')
+                .setDescription(`Tienes una deuda activa por un monto total de **${deudaActual}** monedas.\nEl plazo para liquidar la deuda vence el: <t:${discordTimestamp}:F> (<t:${discordTimestamp}:R>).`);
+            return interaction.editReply({ embeds: [statusEmbed] });
         }
     }
 };

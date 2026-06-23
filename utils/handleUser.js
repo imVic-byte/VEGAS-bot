@@ -5,18 +5,34 @@ const supabase = require('../supabase');
  * @param {string} discordId El ID de Discord del usuario.
  * @returns {Promise<Object|null>} Un objeto con la info del usuario y sus buffos, o null en caso de error.
  */
-async function getUserWithBuffs(discordId) {
+async function getUserWithBuffs(discordId, serverId, guild = null) {
     try {
         // 1. Obtener información base del usuario
         const { data: userProfile, error: userError } = await supabase
             .from('perfiles_economia')
             .select('*')
             .eq('discord_id', discordId)
+            .eq('server_id', serverId)
             .maybeSingle();
 
         if (userError || !userProfile) {
             console.error('Error fetching user profile:', userError);
             return null;
+        }
+
+        let displayName = discordId;
+        if (guild) {
+            try {
+                const member = await guild.members.fetch(discordId);
+                displayName = member.displayName;
+            } catch {
+                if (guild.client) {
+                    try {
+                        const user = await guild.client.users.fetch(discordId);
+                        displayName = user.username;
+                    } catch {}
+                }
+            }
         }
 
         // 2. Obtener mascota activa y sus buffos
@@ -42,7 +58,7 @@ async function getUserWithBuffs(discordId) {
                 id: activePetData.mascotas.id,
                 title: activePetData.mascotas.title
             };
-            
+
             if (activePetData.mascotas.mascotas_buffos) {
                 buffs = activePetData.mascotas.mascotas_buffos;
             }
@@ -51,7 +67,8 @@ async function getUserWithBuffs(discordId) {
         return {
             profile: userProfile,
             activePet: activePet,
-            buffs: buffs
+            buffs: buffs,
+            displayName: displayName
         };
 
     } catch (err) {

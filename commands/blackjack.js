@@ -3,7 +3,8 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
-    ComponentType
+    ComponentType,
+    EmbedBuilder
 } = require('discord.js');
 const { verificarEstadoMorosidad } = require('../utils/handleMorosidad');
 
@@ -64,9 +65,21 @@ module.exports = {
     async execute(interaction) {
         await interaction.deferReply();
 
-        const estadoMora = await verificarEstadoMorosidad(interaction.user.id);
+        const serverId = interaction.guildId;
+        if (!serverId) {
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Este comando solo se puede usar dentro de un servidor.');
+            return interaction.editReply({ embeds: [errEmbed] });
+        }
+
+        const estadoMora = await verificarEstadoMorosidad(interaction.user.id, serverId);
         if (estadoMora.bloqueado) {
-            return interaction.editReply(`🚫 **Acceso Denegado**\nNo puedes apostar en el casino porque el banco te ha embargado por morosidad.\nTienes una deuda vencida de **${estadoMora.deuda}** monedas. Usa \`/prestamo pagar\` para regularizar tu situación.`);
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setTitle('🚫 Acceso Denegado')
+                .setDescription(`No puedes apostar en el casino porque el banco te ha embargado por morosidad.\nTienes una deuda vencida de **${estadoMora.deuda}** monedas. Usa \`/prestamo pagar\` para regularizar tu situación.`);
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         const apuesta = interaction.options.getInteger('apuesta');
@@ -76,18 +89,28 @@ module.exports = {
             .from('perfiles_economia')
             .select('*')
             .eq('discord_id', userId)
+            .eq('server_id', serverId)
             .single();
 
         if (!user) {
-            return interaction.editReply('❌ No tienes una cuenta. Usa /daily primero.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ No tienes una cuenta. Usa `/daily` primero.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         if (user.balance < apuesta) {
-            return interaction.editReply(`❌ ALTO AHÍ!! No tienes suficientes monedas. Saldo actual: ${user.balance}`);
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription(`❌ ¡ALTO AHÍ! No tienes suficientes monedas. Saldo actual: **${user.balance}**`);
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         if (blackjackGames.has(userId)) {
-            return interaction.editReply('❌ ALTO AHÍ!! Ya tienes una partida activa.');
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ ¡ALTO AHÍ! Ya tienes una partida activa.');
+            return interaction.editReply({ embeds: [errEmbed] });
         }
 
         const mazo = crearMazo();
@@ -110,8 +133,15 @@ module.exports = {
 
         let totalJugador = calcularTotal(jugador);
 
+        const crearGameEmbed = () => {
+            return new EmbedBuilder()
+                .setTitle('🃏 BLACKJACK VEGAS')
+                .setColor('Blue')
+                .setDescription(`Tus cartas:\n${jugador.map(c => c.carta).join(' ')}\nTotal: **${totalJugador}**\n\nDealer:\n${dealer[0].carta} ❓\n\n⏰ Tienes 60 segundos.`);
+        };
+
         const respuesta = await interaction.editReply({
-            content: `🃏 **BLACKJACK VEGAS**\n\nTus cartas:\n${jugador.map(c => c.carta).join(' ')}\nTotal: **${totalJugador}**\n\nDealer:\n${dealer[0].carta} ❓\n\n⏰ Tienes 60 segundos.`,
+            embeds: [crearGameEmbed()],
             components: [botones]
         });
 
@@ -122,8 +152,11 @@ module.exports = {
 
         collector.on('collect', async i => {
             if (i.user.id !== userId) {
+                const errEmbed = new EmbedBuilder()
+                    .setColor('Red')
+                    .setDescription('🚫 Esta no es tu partida.');
                 return i.reply({
-                    content: '🚫 Esta no es tu partida.',
+                    embeds: [errEmbed],
                     ephemeral: true
                 });
             }
@@ -137,7 +170,7 @@ module.exports = {
                     collector.stop('busto');
                 } else {
                     await i.update({
-                        content: `🃏 **BLACKJACK VEGAS**\n\nTus cartas:\n${jugador.map(c => c.carta).join(' ')}\nTotal: **${totalJugador}**\n\nDealer:\n${dealer[0].carta} ❓\n\n⏰ Tienes 60 segundos.`
+                        embeds: [crearGameEmbed()]
                     });
                 }
             } else if (i.customId === `bj_stand_${userId}`) {
@@ -186,7 +219,8 @@ module.exports = {
                     await supabase
                         .from('perfiles_economia')
                         .update({ balance: balanceFinal })
-                        .eq('discord_id', userId);
+                        .eq('discord_id', userId)
+                        .eq('server_id', serverId);
                 } catch (error) {
                     console.error(error);
                 }
@@ -194,7 +228,7 @@ module.exports = {
 
             if (balanceFinal < Number(user.balance)) {
                 const { procesarSeguro } = require('../utils/handleSeguro');
-                const resultadoSeguro = await procesarSeguro(userId, apuesta);
+                const resultadoSeguro = await procesarSeguro(userId, serverId, apuesta);
                 
                 if (resultadoSeguro.tituloDerrota === 'Derrota Asegurada') {
                     const reembolso = Math.floor(apuesta * 0.25);
@@ -206,9 +240,25 @@ module.exports = {
             const cartasJugadorStr = jugador.map(c => c.carta).join(' ');
             const cartasDealerStr = dealer.map(c => c.carta).join(' ');
 
+            const netReward = balanceFinal - Number(user.balance);
+            const netRewardStr = netReward > 0 ? `+${netReward}` : `${netReward}`;
+            const color = netReward > 0 ? 'Green' : (netReward === 0 ? 'Blue' : 'Red');
+
+            const embedResultado = new EmbedBuilder()
+                .setTitle('🃏 Blackjack - Resultado Final')
+                .setColor(color)
+                .setDescription(`Tus cartas:\n${cartasJugadorStr} (Total: **${totalJugador}**)\n\nDealer:\n${cartasDealerStr} (Total: **${totalDealer}**)\n\n${resultadoTexto}`)
+                .addFields(
+                    { name: '👤 Jugador', value: interaction.member.displayName, inline: true },
+                    { name: '💵 Apuesta', value: `${apuesta} monedas`, inline: true },
+                    { name: '📈 Resultado Financiero', value: `${netRewardStr} monedas`, inline: true },
+                    { name: '💰 Saldo Actual', value: `${balanceFinal} monedas`, inline: false }
+                );
+
             try {
                 await respuesta.edit({
-                    content: `🃏 **RESULTADO FINAL**\n\nTus cartas:\n${cartasJugadorStr} (Total: **${totalJugador}**)\n\nDealer:\n${cartasDealerStr} (Total: **${totalDealer}**)\n\n${resultadoTexto}\n💰 Saldo actual: **${balanceFinal}**`,
+                    content: '',
+                    embeds: [embedResultado],
                     components: []
                 });
             } catch (error) {

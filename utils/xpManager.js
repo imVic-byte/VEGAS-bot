@@ -6,12 +6,13 @@ const supabase = require('../supabase');
  * @param {number} cantidadBaseXp Cantidad de XP base obtenida.
  * @returns {object|null} Objeto detallando el resultado de la operación.
  */
-async function agregarXp(discordId, cantidadBaseXp) {
+async function agregarXp(discordId, serverId, cantidadBaseXp) {
     try {
         const { data: usuario, error } = await supabase
             .from('perfiles_economia')
             .select('xp, nivel')
             .eq('discord_id', discordId)
+            .eq('server_id', serverId)
             .single();
 
         if (error || !usuario) return null;
@@ -50,7 +51,8 @@ async function agregarXp(discordId, cantidadBaseXp) {
         await supabase
             .from('perfiles_economia')
             .update({ xp: Math.floor(xpActual), nivel: Math.floor(nivelActual) })
-            .eq('discord_id', discordId);
+            .eq('discord_id', discordId)
+            .eq('server_id', serverId);
 
         return {
             subioDeNivel,
