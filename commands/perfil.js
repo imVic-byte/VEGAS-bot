@@ -36,6 +36,7 @@ module.exports = {
                 .from('inventario_titulos')
                 .select('titles(name)')
                 .eq('discord_id', discordId)
+                .eq('server_id', serverId)
                 .eq('equiped', true)
                 .maybeSingle();
 

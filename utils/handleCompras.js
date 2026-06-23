@@ -78,7 +78,11 @@ async function procesarCompra(interaction, itemType, itemId) {
             // Insertar inventario_bovedas
             await supabase
                 .from('inventario_bovedas')
-                .insert({ discord_id: discordId, boveda_id: bovedaData.id });
+                .insert({
+                    discord_id: discordId,
+                    boveda_id: bovedaData.id,
+                    server_id: serverId
+                });
 
             const { EmbedBuilder } = require('discord.js');
             const embed = new EmbedBuilder()
@@ -145,6 +149,7 @@ async function procesarCompra(interaction, itemType, itemId) {
             .from(inventoryTableName)
             .select('*')
             .eq('discord_id', discordId)
+            .eq('server_id', serverId)
             .eq(inventoryColumnName, item.id)
             .limit(1);
 
@@ -195,7 +200,10 @@ async function procesarCompra(interaction, itemType, itemId) {
         await sumarAlFisco(impuesto);
 
         // Agregar al inventario correspondiente
-        let inventoryData = { discord_id: discordId };
+        let inventoryData = {
+            discord_id: discordId,
+            server_id: serverId
+        };
         inventoryData[inventoryColumnName] = item.id;
 
         if (itemType === 'item') {

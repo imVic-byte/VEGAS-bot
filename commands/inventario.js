@@ -7,6 +7,14 @@ module.exports = {
         .setDescription('Muestra todos los artículos que posees'),
 
     async execute(interaction) {
+        const serverId = interaction.guildId;
+        if (!serverId) {
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Este comando solo se puede usar dentro de un servidor.');
+            return interaction.reply({ embeds: [errEmbed], ephemeral: true });
+        }
+
         const discordId = interaction.user.id;
 
         try {
@@ -20,22 +28,26 @@ module.exports = {
                         mascotas_buffos (*)
                     )
                 `)
-                .eq('discord_id', discordId);
+                .eq('discord_id', discordId)
+                .eq('server_id', serverId);
 
             const { data: invRoles } = await supabase
                 .from('inventario_roles')
                 .select('roles(title)')
-                .eq('discord_id', discordId);
+                .eq('discord_id', discordId)
+                .eq('server_id', serverId);
 
             const { data: invTitulos } = await supabase
                 .from('inventario_titulos')
                 .select('titles(name)')
-                .eq('discord_id', discordId);
+                .eq('discord_id', discordId)
+                .eq('server_id', serverId);
 
             const { data: invItems } = await supabase
                 .from('inventario_items')
                 .select('tienda_items(nombre), usos_restantes, expira_el')
-                .eq('discord_id', discordId);
+                .eq('discord_id', discordId)
+                .eq('server_id', serverId);
 
             const embed = new EmbedBuilder()
                 .setTitle(`📦 Inventario de ${interaction.user.username}`)

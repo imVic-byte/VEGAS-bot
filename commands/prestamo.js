@@ -63,6 +63,7 @@ module.exports = {
                 .from('inventario_items')
                 .select('*')
                 .eq('discord_id', userId)
+                .eq('server_id', serverId)
                 .eq('item_id', 5)
                 .single();
 

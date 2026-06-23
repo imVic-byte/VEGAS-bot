@@ -7,6 +7,14 @@ module.exports = {
         .setDescription('Equipa o desequipa tu título activo'),
 
     async execute(interaction) {
+        const serverId = interaction.guildId;
+        if (!serverId) {
+            const errEmbed = new EmbedBuilder()
+                .setColor('Red')
+                .setDescription('❌ Este comando solo se puede usar dentro de un servidor.');
+            return interaction.reply({ embeds: [errEmbed], ephemeral: true });
+        }
+
         const discordId = interaction.user.id;
 
         try {
@@ -23,7 +31,8 @@ module.exports = {
                         description
                     )
                 `)
-                .eq('discord_id', discordId);
+                .eq('discord_id', discordId)
+                .eq('server_id', serverId);
 
             if (error) {
                 console.error(error);

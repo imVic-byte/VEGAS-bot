@@ -25,6 +25,7 @@ async function agregarXp(discordId, serverId, cantidadBaseXp) {
             .from('inventario_items')
             .select('*')
             .eq('discord_id', discordId)
+            .eq('server_id', serverId)
             .eq('item_id', 1)
             .gt('expira_el', nowIso)
             .single();

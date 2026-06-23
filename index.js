@@ -117,12 +117,14 @@ client.on('interactionCreate', async interaction => {
 
                 const selectedRoleIds = interaction.values;
                 const discordId = interaction.user.id;
+                const serverId = interaction.guildId;
 
                 const supabase = require('./supabase');
                 const { data: invRoles, error } = await supabase
                     .from('inventario_roles')
                     .select('roles(discord_role_id)')
-                    .eq('discord_id', discordId);
+                    .eq('discord_id', discordId)
+                    .eq('server_id', serverId);
 
                 if (error || !invRoles) {
                     return interaction.followUp({ content: '❌ Hubo un error verificando tu inventario.', ephemeral: true });
@@ -158,12 +160,14 @@ client.on('interactionCreate', async interaction => {
 
                 const selectedIds = interaction.values;
                 const discordId = interaction.user.id;
+                const serverId = interaction.guildId;
                 const supabase = require('./supabase');
 
                 const { error: unequipError } = await supabase
                     .from('inventario_mascotas')
                     .update({ equiped: false })
-                    .eq('discord_id', discordId);
+                    .eq('discord_id', discordId)
+                    .eq('server_id', serverId);
 
                 if (unequipError) {
                     console.error('Error desequipando mascotas:', unequipError);
@@ -175,6 +179,7 @@ client.on('interactionCreate', async interaction => {
                         .from('inventario_mascotas')
                         .update({ equiped: true })
                         .eq('discord_id', discordId)
+                        .eq('server_id', serverId)
                         .eq('id', selectedIds[0]);
 
                     if (equipError) {
@@ -196,12 +201,14 @@ client.on('interactionCreate', async interaction => {
 
                 const selectedIds = interaction.values;
                 const discordId = interaction.user.id;
+                const serverId = interaction.guildId;
                 const supabase = require('./supabase');
 
                 const { error: unequipError } = await supabase
                     .from('inventario_titulos')
                     .update({ equiped: false })
-                    .eq('discord_id', discordId);
+                    .eq('discord_id', discordId)
+                    .eq('server_id', serverId);
 
                 if (unequipError) {
                     console.error('Error desequipando títulos:', unequipError);
@@ -213,6 +220,7 @@ client.on('interactionCreate', async interaction => {
                         .from('inventario_titulos')
                         .update({ equiped: true })
                         .eq('discord_id', discordId)
+                        .eq('server_id', serverId)
                         .eq('id', selectedIds[0]);
 
                     if (equipError) {

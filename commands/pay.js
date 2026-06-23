@@ -101,6 +101,7 @@ module.exports = {
             .from('inventario_items')
             .select('*')
             .eq('discord_id', emisorId)
+            .eq('server_id', serverId)
             .eq('item_id', 3)
             .gt('usos_restantes', 0)
             .single();

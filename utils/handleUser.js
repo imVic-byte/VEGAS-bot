@@ -47,6 +47,7 @@ async function getUserWithBuffs(discordId, serverId, guild = null) {
                 )
             `)
             .eq('discord_id', discordId)
+            .eq('server_id', serverId)
             .eq('equiped', true)
             .maybeSingle();
 
